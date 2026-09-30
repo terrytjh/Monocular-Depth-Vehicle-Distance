@@ -17,8 +17,15 @@ pose speed; AV2 the lidar cuboid matched by IoU >= 0.5 (+ 0.85 m) and the pose s
 frame-count segments (ego speed only). Haisheng overlays are blacked out (the run's overlay_boxes).
 A run that refused its scale gives a short video whose header says why.
 
+Blind comma2k19 segments (--blind-tag): every tracked car, not only the front one, from the registered all-cars
+result of method C (depth_dash_multicar.py measure-c: d = A_local / (box bottom row - y_h), the same boxes and
+tracks as the depth version), lanes and horizon from the sealed marking run (the geometry window the measurement
+used, marking_geometry.nearest_geometry), the ego speed per second with its 95 % range from the same result.
+Truth only after the files used are checked against the seal, as in demo_depth_ruler.py.
+
   python3 tools/report/demo_marking_geometry.py --clip c2k19_seg21
   python3 tools/report/demo_marking_geometry.py --clip all
+  python3 tools/report/demo_marking_geometry.py --blind-tag TAG --label "..." --short typical_0501_26
 """
 from __future__ import annotations
 
@@ -34,8 +41,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import demo_depth_ruler as R  # noqa: E402  clip table, drawing helpers, truth loaders
-from demo_depth_ruler import (C_EGO, C_HORIZON, C_LINE, C_SOFT, C_TRUTH, C_WHITE, ROOT,  # noqa: E402
-                              Canvas, D, Writer, bgr, draw_line, font_px, header, header_height, legend, place)
+from demo_depth_ruler import (C_EGO, C_FAR, C_HORIZON, C_LINE, C_OTHER, C_SOFT, C_TRUTH, C_WHITE,  # noqa: E402
+                              ROOT, Canvas, D, Writer, bgr, draw_line, font_px, header, header_height, legend, place)
 
 OUT = R.OUT
 TICKS_M = (10, 20, 30, 40)
@@ -281,12 +288,155 @@ def render(name, still_at=None, still_out=None):
     print("wrote", out_mp4, "" if ok else f"(refused: {res.get('reason', '')[:80]})")
 
 
+def draw_geometry(cv, img, wd, A_loc, y_bot, vp_margin, min_rows, th):
+    """Ego-lane lines, the horizon (dashed) and the 10/20/30/40 m marks d = A_local / (y - y_h) on the road."""
+    h, w, fs = cv.h, cv.w, cv.fs
+    vp = wd["vp_row"]
+    for sd in ("left", "right"):
+        draw_line(img, wd[sd], vp + vp_margin * h, y_bot, C_LINE, th + 1)
+    yv = int(round(vp))
+    for x in range(0, w, 24):
+        cv2.line(img, (x, yv), (min(w - 1, x + 13), yv), bgr(C_HORIZON), max(1, th - 1), cv2.LINE_AA)
+    hl = [("地平線(兩條車道線的交點)", C_HORIZON, cv.fsmall)]
+    ly = yv - cv.line_h(cv.fsmall) - 3
+    cv.fill(fs // 2 - 3, ly, fs // 2 + cv.width(hl) + 3, yv - 2, "#000000", 0.6)
+    cv.runs(fs // 2, ly, hl)
+    marks = [(fs // 2 - 3, ly, fs // 2 + cv.width(hl) + 3, yv - 2)]
+    if A_loc is None:
+        return marks
+    for i, dm in enumerate(TICKS_M):
+        y = vp + A_loc / dm
+        if not (vp + min_rows < y < y_bot):
+            continue
+        xl, xr = D.line_x(wd["left"], y), D.line_x(wd["right"], y)
+        ext = 0.08 * (xr - xl)
+        cv2.line(img, (int(xl - ext), int(round(y))), (int(xr + ext), int(round(y))), (255, 255, 255), th, cv2.LINE_AA)
+        lab = [(f"{dm} m", C_WHITE, cv.fb)]
+        lw_ = cv.width(lab) + 8
+        lh = cv.line_h(cv.fb)
+        x = xr + ext + 6 if i % 2 == 0 else xl - ext - 6 - lw_
+        x = min(max(0, x), w - lw_)
+        cv.fill(x, y - lh / 2, x + lw_, y + lh / 2, "#000000", 0.55)
+        cv.runs(x + 4, y - lh / 2, lab)
+        marks.append((x, y - lh / 2, x + lw_, y + lh / 2))
+    return marks
+
+
+def render_blind(short, clip, still_at=None, still_out=None, out_dir=None):
+    """Method C on a blind comma2k19 segment of the registered run: every car of the all-cars result (_cars_c.json)."""
+    import depth_dash_multicar as M
+    import marking_geometry as MG
+    seal = R.check_blind(clip, ("run", "cars_c", "tracks"))
+    out_dir = Path(out_dir) if out_dir else R.BLIND_OUT
+    out_dir.mkdir(parents=True, exist_ok=True)
+    res = json.loads((ROOT / clip["run"]).read_text())
+    cars = json.loads((ROOT / clip["cars_c"]).read_text())
+    if res.get("status") != "ok" or cars.get("status") == "refused" or "samples" not in cars:
+        raise SystemExit(f"{clip['tag']}: method C refused on this segment ({res.get('reason', cars.get('reason', ''))[:80]})")
+    tr_p = Path(cars["tracks"])
+    tr_p = tr_p if tr_p.is_absolute() else ROOT / tr_p
+    mk_p = Path(cars["marking"])
+    mk_p = mk_p if mk_p.is_absolute() else ROOT / mk_p
+    if tr_p.resolve() != (ROOT / clip["tracks"]).resolve() or mk_p.resolve() != (ROOT / clip["run"]).resolve():
+        raise SystemExit(f"{Path(clip['cars_c']).name} does not point at the sealed tracks / marking run")
+    tracks = json.loads(tr_p.read_text())["frames"]
+    fdir = Path(res["frames_dir"])
+    frames = D.list_frames(fdir if fdir.is_absolute() else ROOT / fdir)
+    n = len(frames)
+    h, w = cv2.imread(str(frames[0])).shape[:2]
+    fps = float(res["fps"])
+    dp, pc = res["dash_params"], cars["params_c"]
+    a_fac = float(cars.get("A_car_factor", 1.0))        # 1 unless a distance-dependent car ruler was registered
+    rul = res.get("rulers") or []
+    rul_f = np.array([r["frame"] for r in rul]) if rul else None
+    reach = cars.get("ruler_reach_m")
+    samples = cars["samples"]
+    sfi = [s["fi"] for s in samples]
+    ego_bins = {int(round(e["t0"])): e for e in cars.get("ego", [])}
+    # truth, only now (the seal has been checked)
+    _, pairs, _ = M.c2k19_score(cars, R.c2k19_truth_dir(clip), return_rows=True)
+    truth_of = {(pp["t"], pp["id"]): pp for pp in pairs}
+    ego_true = R.ego_truth_bins(clip, n, fps)
+
+    fs = font_px(h, w)
+    th = max(2, round(fs / 8))
+    todo = range(n) if still_at is None else [int(round(still_at * fps))]
+    out_mp4 = out_dir / f"methodC_{short}.mp4"
+    writer = None if still_at is not None else Writer(out_mp4, w, h, fps)
+    mid = n // 2
+    for fi in todo:
+        j = max(0, bisect.bisect_right(sfi, fi) - 1)
+        s = samples[j]
+        img = cv2.imread(str(frames[fi]))
+        cv = Canvas(img, fs)
+        t = fi / fps
+        wd = MG.nearest_geometry(res["windows"], fi, fps, pc["geom_max_s"])     # the window the measurement uses
+        A_loc = rul[int(np.argmin(np.abs(rul_f - fi)))]["A_local"] * a_fac if rul else None
+        e = ego_bins.get(int(t // 1.0))
+        line1 = [("標線幾何法(只用標線,沒有深度模型)", C_WHITE, cv.fh),
+                 (f"   {clip['title']}", C_WHITE, cv.fb), (f"   t = {t:5.1f} s", C_SOFT, cv.f)]
+        line2 = [(f"自車速 {e['kmh']:.0f} ± {e['ci95_kmh']:.0f} km/h" if e and e.get("kmh") is not None
+                  else "自車速 沒有讀值", C_WHITE, cv.fh)]
+        tv = ego_true.get(int(t // 1.0))
+        if tv is not None:
+            line2.append((f"   定位車速 {tv:.0f} km/h", C_TRUTH, cv.fb))
+        line3 = [(f"A = {res['A'] * a_fac:.0f} px·m", C_WHITE, cv.fb)]
+        if A_loc is not None:
+            line3.append((f"(這附近 {A_loc:.0f})", C_SOFT, cv.f))
+        line3.append((f"   地平線 {wd['vp_row']:.0f} 列" if wd is not None else "   沒有地平線", C_WHITE, cv.fb))
+        line3.append((f"   可信範圍 {reach:.0f} m" if reach else "   可信範圍 —", C_WHITE, cv.fb))
+        line3.append((f"   法定虛線週期 {res['cycle_m']:g} m", C_SOFT, cv.f))
+        hdr_lines = [line1, line2, line3, [(R.seal_text(clip, seal), C_SOFT, cv.fsmall)]]
+        hdr_h = header_height(cv, hdr_lines)
+        placed = []
+        if wd is not None:
+            placed += draw_geometry(cv, img, wd, A_loc, res["det_rows"][1], dp["vp_margin"], res["params"]["min_rows"], th)
+        else:
+            st = [("這一刻沒有地平線(兩條本車道線沒追到):不量距離", C_TRUTH, cv.fb)]
+            sw, sh = cv.width(st) + fs, cv.line_h(cv.fb) + 6
+            cv.fill(0, hdr_h, sw, hdr_h + sh, "#000000", 0.6)
+            cv.runs(fs // 2, hdr_h + 3, st)
+            placed.append((0, hdr_h, sw, hdr_h + sh))
+        now = {b[6]: b[:4] for b in tracks.get(frames[fi].stem, []) if b[6] >= 0}
+        drawn = R.draw_cars(cv, img, s, fi, now, tracks, truth_of, "雷達", placed, hdr_h)
+        for (x0, y0, x1, y1), _, far, col in drawn:        # the row read: the box bottom (tyres on the road)
+            if not far:
+                cx = int(round((x0 + x1) / 2))
+                cv2.circle(img, (cx, y1), th + 2, (255, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(img, (cx, y1), th + 2, bgr(col), 2, cv2.LINE_AA)
+        header(cv, hdr_lines)
+        legend(cv, [(C_EGO, "本車道的車", C_WHITE), (C_OTHER, "其他車道的車", C_WHITE),
+                    (C_FAR, "尺的範圍外:只給距離", C_WHITE), (C_LINE, "追到的本車道線", C_WHITE),
+                    (C_HORIZON, "地平線", C_WHITE),
+                    (None, "白點 = 讀距離的列(框底);白色橫線 = d = A ÷ (y – y_h) 的 10/20/30/40 m", C_SOFT),
+                    (None, "黃字 = 真值:雷達(距離已加固定偏移 2.37 m)與定位車速", C_TRUTH)])
+        frame = cv.finish()
+        if still_at is not None:
+            dst = Path(still_out or out_dir / f"methodC_{short}_t{still_at:g}.png")
+            cv2.imwrite(str(dst), frame)
+            print("wrote", dst)
+            return
+        writer.write(frame)
+        if fi == mid:
+            cv2.imwrite(str(out_dir / f"methodC_{short}.png"), frame)
+    writer.close()
+    print("wrote", out_mp4)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--clip", required=True, help="one of: " + ", ".join(R.CLIPS) + ", or all")
+    ap.add_argument("--clip", default=None, help="one of: " + ", ".join(R.CLIPS) + ", or all")
     ap.add_argument("--still-at", type=float, default=None, help="render only the frame at this time (s) to a PNG")
     ap.add_argument("--still-out", default=None)
+    R.blind_args(ap)
     a = ap.parse_args()
+    if a.blind_tag:
+        if not (a.label and a.short):
+            ap.error("--blind-tag needs --label and --short")
+        render_blind(a.short, R.blind_clip(a.blind_tag, a.label, a.seal), a.still_at, a.still_out, a.out_dir)
+        return
+    if not a.clip:
+        ap.error("--clip or --blind-tag is required")
     for nm in (list(R.CLIPS) if a.clip == "all" else [a.clip]):
         render(nm, a.still_at, a.still_out)
 

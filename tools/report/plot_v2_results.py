@@ -74,13 +74,18 @@ def main():
     tags = [l.strip() for l in open(a.list) if l.strip() and not l.startswith("#")]
     data = {k: collect(tags, spec, a.truth_root, a.verify_sealed) for k, spec in (("depth", a.depth), ("c", a.c))}
 
-    fig, ax = plt.subplots(1, 4, figsize=(22, 5.6))
+    fig, ax = plt.subplots(1, 4, figsize=(22, 7.0))
     lim = 45
+    v_all = np.array([e["truth"] for k in data for e in data[k][1]] or [0, 130])
+    vr = (max(0, v_all.min() - 5), v_all.max() + 5)          # ego-speed axes: the truth's range
     for k, (pairs, ego, used) in data.items():
         inside = [p for p in pairs if not p["far"] and p["lane"] in (-1, 0, 1)]
         t = np.array([p["truth"] for p in inside]); o = np.array([p["dist"] for p in inside])
         e = 100 * (o - t) / t
         lab = f"{NAME[k]}({used} 段,{len(inside)} 筆,中位誤差 {np.median(np.abs(e)):.1f}%)"
+        n_out = int(np.sum((t > lim) | (o > lim)))
+        if n_out:
+            lab += f"\n  另 {n_out} 筆的雷達距離超過 {lim} m,在圖框外"
         ax[0].scatter(t, o, s=3, alpha=0.25, color=COL[k], label=lab, rasterized=True)
         bins = np.arange(0, lim + 5, 5)
         mid, med, q1, q3 = [], [], [], []
@@ -92,8 +97,10 @@ def main():
         ax[1].plot(mid, med, "o-", color=COL[k], label=NAME[k])
         ax[1].fill_between(mid, q1, q3, color=COL[k], alpha=0.15)
         ev = np.array([x["kmh"] for x in ego]); et = np.array([x["truth"] for x in ego])
+        n_out = int(np.sum((ev < vr[0]) | (ev > vr[1])))
         ax[2].scatter(et, ev, s=4, alpha=0.3, color=COL[k], rasterized=True,
-                      label=f"{NAME[k]}(每秒 MAE {np.mean(np.abs(ev - et)):.2f} km/h,n {len(ev)})")
+                      label=f"{NAME[k]}(每秒 MAE {np.mean(np.abs(ev - et)):.2f} km/h,n {len(ev)})"
+                            + (f"\n  另 {n_out} 秒的讀值超出圖框(最高 {ev.max():.0f} km/h)" if n_out else ""))
         rs = [p for p in pairs if p.get("rel") is not None]
         rv = np.array([p["rel"] for p in rs]); rt = np.array([p["rel_truth"] for p in rs])
         ax[3].scatter(rt, rv, s=4, alpha=0.3, color=COL[k], rasterized=True,
@@ -105,19 +112,17 @@ def main():
     ax[0].set_title("距離(本車道與左右一道,尺的範圍內)")
     ax[1].axhline(0, color="#333", lw=1); ax[1].set_xlabel("真實距離(公尺)"); ax[1].set_ylabel("相對誤差(%)")
     ax[1].set_title("誤差對距離(中位數,陰影 = 中間一半)\n平的偏移 = 尺度錯;斜的 = 幾何錯")
-    v = np.array([x_ for k in data for x_ in [e["truth"] for e in data[k][1]]] or [0, 130])
-    vr = (max(0, v.min() - 5), v.max() + 5)
     ax[2].plot(vr, vr, color="#333", lw=1); ax[2].set_xlim(vr); ax[2].set_ylim(vr)
     ax[2].set_xlabel("定位車速(km/h)"); ax[2].set_ylabel("我們的自車速(km/h)"); ax[2].set_title("自車速(每秒)")
     ax[3].plot([-40, 40], [-40, 40], color="#333", lw=1); ax[3].set_xlim(-40, 40); ax[3].set_ylim(-40, 40)
     ax[3].set_xlabel("雷達相對速度(km/h)"); ax[3].set_ylabel("我們的相對速度(km/h)"); ax[3].set_title("他車相對速度(1.6 秒)")
-    for i, x_ in enumerate(ax):
-        x_.legend(fontsize=8, loc={0: "lower right", 1: "lower left"}.get(i, "upper left"),
-                  markerscale=1 if i == 1 else 3, framealpha=0.9)
+    for i, x_ in enumerate(ax):                  # legends under the axes: none of them covers data
+        x_.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.13), markerscale=1 if i == 1 else 3,
+                  frameon=False)
         x_.grid(alpha=0.25)
     if a.title:
         fig.suptitle(a.title, fontsize=13)
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.035, right=0.99, top=0.86, bottom=0.27, wspace=0.2)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(a.out, dpi=110)
     print("wrote", a.out)
