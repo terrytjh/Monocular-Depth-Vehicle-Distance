@@ -1,0 +1,16 @@
+{
+  "sealed_utc": "2026-09-30T18:36:16Z",
+  "git_commit": "edf76179017a05ebe1d96a34d2d08a8ce8cf7695",
+  "files": {
+    "hs003_dash.json": "d5d7ed30a1a12e10f216f245dfd883ef28a55730fbe86b5393822d92e0d8c926",
+    "hs003_run.json": "21fd51af3301f0fb7199b454bd5fb561c97e81d96baa139f300881208a5418de",
+    "hs004_dash.json": "b464837dc5bfe08ac28e6f52d432517c7b2997a5903c7dad94d7300459bfa091",
+    "hs004_run.json": "c6c7b2f2fc6944fdad1508f0a38f7050df71255d132b4f142bd5746c2640fc66",
+    "hs005_dash.json": "7b8c92974d0aadfc46d526fc7e1fa8d4546c98ae6b9283962f6946dbac877dac",
+    "hs005_run.json": "95f9ee0dba0c80c1f1bee23492769fdeccd9da6444fb1ef545ca3542c9546ff4"
+  },
+  "inputs": {
+    "DEPTH_DASH_V2_PREREG.md": "de30fa37f686e0b2bcdbb281f2aeb2e458d3af98f05c31c0d3baa37a7ce533d1"
+  },
+  "absent_at_seal": []
+}
