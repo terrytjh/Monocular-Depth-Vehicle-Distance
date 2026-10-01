@@ -22,6 +22,10 @@ from a dash-scale result, nothing here re-measures them. docs/DEPTH_DASH_V2_PRER
              ranges    every speed carries a 95 % range: +-1.96 x mult x sigma, sigma from the fit (slope standard
                        error, median standard error) and the ruler's own scale uncertainty, mult set on open clips
            and the ego speed per second (median of the dash-scale readings, with its 95 % range).
+           Options (2026-10-02, off by default): --car-ruler ground reads the cars with a z + b fitted to the marking
+           run's ground model on the ego lane's road rows, 8-30 m, over +-2.5 s (GROUND_RULER; reach 30 m);
+           --distance-smooth ts16 reports each car's distance from a Theil-Sen line over its track's readings within
+           +-0.8 s (DIST_SMOOTH), the speeds still from the raw readings.
            Boxes whose bottom reaches the bonnet rows (depth_dash_scale.static_rows) are skipped: YOLO calls the
            ego vehicle's own bonnet a car. Reads frames, cached depth maps, the dash-scale result and the tracks
            only; no answer file.
@@ -134,7 +138,7 @@ def cmd_track(a):
         if (n + 1) % 200 == 0:
             print(f"{n + 1}/{len(frames)}", flush=True)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(a.out).write_text(json.dumps(dict(params=PARAMS, frames_dir=str(a.frames), osd_boxes=osd, frames=per)))
+    Path(a.out).write_text(json.dumps(dict(params=params_out(), frames_dir=str(a.frames), osd_boxes=osd, frames=per)))
     print("wrote", a.out)
 
 
@@ -182,7 +186,7 @@ def cmd_retrack(a):
             tracker.update(Boxes(np.zeros((0, 6), dtype=np.float32), (h, w)), img)
         per[f.stem] = [[*r[:6], i] for r, i in zip(rows, ids)]
     used = {k: cfg[k] for k in ("tracker_type", "track_buffer", "match_thresh", "fuse_score")}
-    Path(a.out).write_text(json.dumps(dict(params=dict(PARAMS, tracker_used=used), frames_dir=str(frames_dir_of(src)),
+    Path(a.out).write_text(json.dumps(dict(params=params_out(tracker_used=used), frames_dir=str(frames_dir_of(src)),
                                            osd_boxes=src.get("osd_boxes"), frames=per)))
     print("wrote", a.out)
 
@@ -230,9 +234,11 @@ def ego_bins(res, n_frames, fps, scale_rel, p=PARAMS):
     return out
 
 
-def track_speeds(samples, ego_speeds, scale_rel, hw, m_rel, m_ego):
+def track_speeds(samples, ego_speeds, scale_rel, hw, m_rel, m_ego, scale_ego=None):
     """Relative / absolute speed per track, inside the ruler's reach only (fills the objects in place);
-    returns the objects grouped by track id. ego_speeds: the pairwise ego readings (frame_i, frame_j, kmh)."""
+    returns the objects grouped by track id. ego_speeds: the pairwise ego readings (frame_i, frame_j, kmh).
+    scale_ego: the ego ruler's scale uncertainty when the cars are read with another ruler (default scale_rel)."""
+    scale_ego = scale_rel if scale_ego is None else scale_ego
     by_id = {}
     for j, s in enumerate(samples):
         for o in s["objects"]:
@@ -262,7 +268,7 @@ def track_speeds(samples, ego_speeds, scale_rel, hw, m_rel, m_ego):
             o["abs_kmh"] = None
             if len(ego) >= PARAMS["min_ego"]:
                 e_med = float(np.median(ego))
-                e_sig = float(np.hypot(1.253 * np.std(ego, ddof=1) / np.sqrt(len(ego)), e_med * scale_rel))
+                e_sig = float(np.hypot(1.253 * np.std(ego, ddof=1) / np.sqrt(len(ego)), e_med * scale_ego))
                 o["ego_win_kmh"], o["ego_win_sigma_kmh"] = e_med, e_sig
                 o["abs_kmh"] = e_med + o["rel_kmh"]
                 o["abs_ci95_kmh"] = 1.96 * float(np.hypot(m_rel * o["rel_sigma_kmh"], m_ego * e_sig))
@@ -329,70 +335,244 @@ def dedup(boxes, iou_max):
     return [b for b in boxes if id(b) in ids]
 
 
+# 2026-10-02, the ground-calibrated car ruler (measure --car-ruler ground --marking run.json; off by default). On a flat
+# road the marking run gives the forward distance of every road row, D_g = A_local / (y - y_h); the depth model gives z on
+# the same pixels. D_g = a z + b is fitted on the ego lane's road rows of every sampled frame within +-w_s seconds, and
+# the cars are read with a z + b. Kept out of PARAMS (written into every cars file) like EGO_RULER.
+GROUND_RULER = dict(
+    d_min=8.0, d_max=30.0,   # road rows whose centre lies this far by D_g (half-resolution rows, above the bonnet row - bonnet_px);
+                             # d_max is also the ruler's reach: cars read beyond it are flagged, distance only
+    lane_keep=0.70,          # the middle 70 % of the ego lane at that row (lane lines of the marking run's nearest kept window)
+    box_conf=0.1, box_wpad=0.05, box_hpad=0.02,   # minus every stored detector box of the frame (conf >= 0.1), widened by 5 %
+                             # of its width each side and 2 % of its height downward (the car's shadow)
+    min_px=5,                # a row needs >= this many pixels; z_row = their median
+    w_s=2.5,                 # rows of the sampled frames within +-this many seconds pooled (method C's registered local window)
+    trim_sd=3.0, trim_floor=0.3,   # least squares, re-fitted twice without rows off by > max(trim_sd x robust sd, trim_floor m)
+    min_rows=20, near_max=12.0, far_min=20.0,     # accepted: >= min_rows inlier rows reaching D_g <= near_max and >= far_min ...
+    a_range=(0.5, 2.0), b_max=10.0,               # ... with a in a_range and |b| <= b_max; otherwise the frame gives no car readings
+)
+
+
+def ground_rows(depth, wd, A, boxes, h, w, bonnet, p=GROUND_RULER):
+    """(D_g, z_row, y) per half-resolution row of the ego lane inside [d_min, d_max] by D_g; vehicle boxes masked."""
+    dh, dw = depth.shape
+    vp, L, R = wd["vp_row"], wd["left"], wd["right"]
+    mask = np.zeros((dh, dw), bool)
+    for b in boxes:
+        x0, y0, x1, y1, conf = b[:5]
+        if conf < p["box_conf"]:
+            continue
+        bw, bh = x1 - x0, y1 - y0
+        X0, X1 = (x0 - p["box_wpad"] * bw) * dw / w, (x1 + p["box_wpad"] * bw) * dw / w
+        Y0, Y1 = y0 * dh / h, (y1 + p["box_hpad"] * bh) * dh / h
+        mask[max(0, int(np.floor(Y0))): max(0, int(np.ceil(Y1)) + 1), max(0, int(np.floor(X0))): max(0, int(np.ceil(X1)) + 1)] = True
+    out = []
+    for hy in range(dh):
+        y = (hy + 0.5) * h / dh
+        if y <= vp + 1 or y >= bonnet - PARAMS["bonnet_px"]:
+            continue
+        dg = A / (y - vp)
+        if not (p["d_min"] <= dg <= p["d_max"]):
+            continue
+        xl, xr = L["a"] * y + L["b"], R["a"] * y + R["b"]
+        if xr - xl < 10:
+            continue
+        pad = (1 - p["lane_keep"]) / 2 * (xr - xl)
+        c0, c1 = max(0, int(np.ceil((xl + pad) * dw / w))), min(dw - 1, int(np.floor((xr - pad) * dw / w)))
+        if c1 < c0:
+            continue
+        seg = depth[hy, c0: c1 + 1][~mask[hy, c0: c1 + 1]]
+        seg = seg[np.isfinite(seg) & (seg > 0)]
+        if len(seg) >= p["min_px"]:
+            out.append((dg, float(np.median(seg)), y))
+    return np.array(out, float).reshape(-1, 3)
+
+
+def ground_fit(D_g, z, p=GROUND_RULER):
+    """Robust D_g = a z + b with the acceptance checks; None with fewer than 3 rows left."""
+    m = np.ones(len(D_g), bool)
+    a_ = b_ = None
+    for _ in range(3):
+        if m.sum() < 3:
+            return None
+        a_, b_ = (float(v) for v in np.polyfit(z[m], D_g[m], 1))
+        r = D_g - (a_ * z + b_)
+        s = 1.4826 * np.median(np.abs(r[m]))
+        m = np.abs(r) <= max(p["trim_sd"] * s, p["trim_floor"])
+    ok = (m.sum() >= p["min_rows"] and D_g[m].min() <= p["near_max"] and D_g[m].max() >= p["far_min"]
+          and p["a_range"][0] <= a_ <= p["a_range"][1] and abs(b_) <= p["b_max"])
+    r = D_g - (a_ * z + b_)
+    return dict(a=a_, b=b_, n=int(m.sum()), rsd=float(1.4826 * np.median(np.abs(r[m]))), ok=bool(ok))
+
+
+def ground_window_fits(t, rows, p=GROUND_RULER):
+    """One fit per sample from the rows of every sample within +-w_s seconds (rows[j]: None without depth or geometry)."""
+    t = np.asarray(t, float)
+    fits = []
+    for tj in t:
+        pool = [rows[i] for i in np.where(np.abs(t - tj) <= p["w_s"])[0] if rows[i] is not None and len(rows[i])]
+        R = np.vstack(pool) if pool else None
+        fits.append(ground_fit(R[:, 0], R[:, 1]) if R is not None and len(R) >= 3 else None)
+    return fits
+
+
+# 2026-10-02, the reported distance smoothed along each track (measure --distance-smooth ts16; default none). The relative
+# speed is computed before, from the raw readings, exactly as registered; the reach flag stays the raw reading's.
+DIST_SMOOTH = dict(
+    ts16=dict(half=4, min_n=3),   # Theil-Sen line over the track's readings within +-half samples (+-0.8 s, the relative speed's
+                                  # 1.6 s window), its value at the reading's own time; fewer than min_n readings -> the raw one.
+                                  # The window is truncated at a track's ends and gaps, nothing is extrapolated
+)
+
+
+def theil_sen(t, d):
+    """(slope, intercept): the median of the pairwise slopes, then the median of d - slope x t."""
+    t, d = np.asarray(t, float), np.asarray(d, float)
+    i, j = np.triu_indices(len(t), 1)
+    dt = t[j] - t[i]
+    ok = dt != 0
+    s = float(np.median((d[j] - d[i])[ok] / dt[ok]))
+    return s, float(np.median(d - s * t))
+
+
+def smooth_distances(samples, how):
+    """Replaces each object's dist by its track's smoothed value (in place); the raw reading is kept as dist_raw."""
+    p = DIST_SMOOTH[how]
+    by_id = {}
+    for j, s in enumerate(samples):
+        for o in s["objects"]:
+            by_id.setdefault(o["id"], {})[j] = o
+    for seq in by_id.values():
+        sm = {}
+        for j in seq:
+            nb = [i for i in range(j - p["half"], j + p["half"] + 1) if i in seq]
+            if len(nb) < p["min_n"]:
+                sm[j] = seq[j]["dist"]
+                continue
+            tt = np.array([samples[i]["t"] for i in nb]) - samples[j]["t"]
+            sm[j] = theil_sen(tt, np.array([seq[i]["dist"] for i in nb]))[1]
+        for j, o in seq.items():
+            o["dist_raw"], o["dist"] = o["dist"], sm[j]
+
+
 def cmd_measure(a):
     res = json.loads(Path(a.dash).read_text())
+    mode = a.car_ruler or PARAMS["car_ruler"]
+    ground = mode == "ground"
+    if ground and not a.marking:
+        raise SystemExit("--car-ruler ground needs --marking (the marking run's *_run.json)")
+    ego_refused = None                             # ground ruler: the cars do not use k, so a refused k only removes the ego speed
     if res.get("status") != "ok":
-        print(f"{a.dash}: the dash-scale result was refused ({res.get('reason', '')[:80]}); no distances")
-        return
+        if not ground:
+            print(f"{a.dash}: the dash-scale result was refused ({res.get('reason', '')[:80]}); no distances")
+            return
+        ego_refused = f"dash-scale result refused: {res.get('reason', '')[:160]}"
     tr = json.loads(Path(a.tracks).read_text())["frames"]
     frames = D.list_frames(Path(a.frames))
     h, w = cv2.imread(str(frames[0])).shape[:2]
     bonnet = D.static_rows(frames)[0]
-    k, fps, step = res["k"], res["fps"], res["step"]
+    k, fps, step = res.get("k"), res["fps"], res["step"]
     g = a.k_guard if a.k_guard is not None else PARAMS["k_guard"]
-    if g and not (1 / g <= k <= g):
+    if g and k is not None and not (1 / g <= k <= g):
         why = f"k {k:.3f} is off the depth model's own metres by more than x{g} (half or double legal cycle?)"
-        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.out).write_text(json.dumps(dict(status="refused", reason=why, k=k, k_guard=g, dash=str(a.dash))))
-        print(f"{a.out}: refused -- {why}")
-        return
-    mode = a.car_ruler or PARAMS["car_ruler"]
-    r_car, n_far = car_ruler_factor([(x["z_near"] * k, x["period"]) for x in res["periods"]
-                                     if x["side"] in res.get("lines_used", [])], res["cycle_m"], mode)
-    k_car = k * r_car
-    reach = ruler_reach(res)
-    if reach is not None:
-        reach *= r_car
+        if not ground:
+            Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.out).write_text(json.dumps(dict(status="refused", reason=why, k=k, k_guard=g, dash=str(a.dash))))
+            print(f"{a.out}: refused -- {why}")
+            return
+        ego_refused = why
+    if ground:
+        import marking_geometry as MG
+        mk = json.loads(Path(a.marking).read_text())
+        if mk.get("status") != "ok":
+            print(f"{a.marking}: the marking run was refused ({mk.get('reason', '')[:80]}); no distances")
+            return
+        rul = mk["rulers"]
+        rf = np.array([r_["frame"] for r_ in rul])
+        reach = GROUND_RULER["d_max"]
+        pend, rows = [], []                        # per sample: (object, z) waiting for the window fit; the road rows
+    else:
+        r_car, n_far = car_ruler_factor([(x["z_near"] * k, x["period"]) for x in res["periods"]
+                                         if x["side"] in res.get("lines_used", [])], res["cycle_m"], mode)
+        k_car = k * r_car
+        reach = ruler_reach(res)
+        if reach is not None:
+            reach *= r_car
     every = max(1, int(round(PARAMS["sample_s"] * fps)))
     cache = Path(a.depth_cache)
     samples = []                                   # (fi, t, [objects])
     for fi in range(0, len(frames), every):
         stem = frames[fi].stem
-        wd = D.lines_for(dict(windows=res["windows"]), fi / step)
+        wd = D.lines_for(dict(windows=res["windows"]), fi / step) if res.get("windows") else {}
         objs = []
         cand = [b for b in tr.get(stem, []) if b[6] >= 0 and b[4] >= PARAMS["min_conf"]
                 and b[3] < bonnet - PARAMS["bonnet_px"]]
         cand = dedup(cand, a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"])
-        if cand:
+        depth = None
+        if cand or ground:                         # the ground ruler needs the road of frames without cars too
             try:
                 depth = D.load_depth(cache, frames[fi])
             except FileNotFoundError:
                 depth = None
-            if depth is not None:
-                dh, dw = depth.shape
-                r = PARAMS["patch"] // 2
-                for x0, y0, x1, y1, conf, cls, tid in cand:
-                    yy = int((y1 - PARAMS["read_up"] * (y1 - y0)) * dh / h)
-                    xx = int((x0 + x1) / 2 * dw / w)
-                    z = float(np.median(depth[max(0, yy - r): yy + r + 1, max(0, xx - r): xx + r + 1]))
-                    d = k_car * z
-                    objs.append(dict(id=int(tid), box=[x0, y0, x1, y1], conf=conf, cls=int(cls),
-                                     lane=lane_of((x0, y0, x1, y1), wd), dist=d,
-                                     far=bool(reach is None or d > reach)))
+        if depth is not None:
+            dh, dw = depth.shape
+            r = PARAMS["patch"] // 2
+            for x0, y0, x1, y1, conf, cls, tid in cand:
+                yy = int((y1 - PARAMS["read_up"] * (y1 - y0)) * dh / h)
+                xx = int((x0 + x1) / 2 * dw / w)
+                z = float(np.median(depth[max(0, yy - r): yy + r + 1, max(0, xx - r): xx + r + 1]))
+                if ground:
+                    objs.append((dict(id=int(tid), box=[x0, y0, x1, y1], conf=conf, cls=int(cls),
+                                      lane=lane_of((x0, y0, x1, y1), wd)), z))
+                    continue
+                d = k_car * z
+                objs.append(dict(id=int(tid), box=[x0, y0, x1, y1], conf=conf, cls=int(cls),
+                                 lane=lane_of((x0, y0, x1, y1), wd), dist=d,
+                                 far=bool(reach is None or d > reach)))
+        if ground:
+            # road rows against the marking run's nearest kept lane lines and the ruler A_local nearest in time
+            wm = MG.nearest_geometry(mk["windows"], fi, fps, PARAMS_C["geom_max_s"]) if depth is not None else None
+            rows.append(ground_rows(depth, wm, rul[int(np.argmin(np.abs(rf - fi)))]["A_local"], tr.get(stem, []), h, w, bonnet)
+                        if wm is not None else None)
+            pend.append(objs)
+            objs = []
         samples.append(dict(fi=fi, t=fi / fps, objects=objs))
+    if ground:
+        fits = ground_window_fits([s["t"] for s in samples], rows)
+        for s, f, po in zip(samples, fits, pend):
+            s["ground_fit"] = f
+            if not (f and f["ok"]):
+                continue                           # no accepted fit: no car readings on this frame
+            for o, z in po:
+                d = f["a"] * z + f["b"]
+                if np.isfinite(d) and d > 0:
+                    s["objects"].append(dict(o, dist=float(d), far=bool(d > reach)))
     hw = int(a.half_win) if getattr(a, "half_win", None) else PARAMS["half_win"]
     scale_rel = ruler_scale_sigma(res)
     ego_mode = getattr(a, "ego_ruler", None) or "single"
-    if ego_mode == "local":
+    if ego_mode == "local" and not ego_refused:
         res = dict(res, speeds=local_ruler_speeds(res))
-    by_id = track_speeds(samples, res["speeds"], scale_rel, hw, PARAMS["rel_sigma_mult"], PARAMS["ego_sigma_mult"])
-    out = dict(params=dict(PARAMS, half_win=hw, dedup_iou=a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"]), dash=str(a.dash), tracks=str(a.tracks), k=k, cycle_m=res["cycle_m"],
+    # the ground fit carries no confidence interval of its own: its relative speeds get no scale term (the ego keeps the dash ruler's)
+    by_id = track_speeds(samples, [] if ego_refused else res["speeds"], 0.0 if ground else scale_rel, hw,
+                         PARAMS["rel_sigma_mult"], PARAMS["ego_sigma_mult"], scale_ego=scale_rel)
+    smooth = getattr(a, "distance_smooth", None) or "none"
+    if smooth != "none":
+        smooth_distances(samples, smooth)
+    out = dict(params=params_out(half_win=hw, dedup_iou=a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"]), dash=str(a.dash), tracks=str(a.tracks), k=k, cycle_m=res["cycle_m"],
                ruler_reach_m=reach, ruler_scale_sigma=scale_rel, fps=fps, n_frames=len(frames),
-               ego=ego_bins(res, len(frames), fps, scale_rel), samples=samples)
-    if mode != "single":
+               ego=[] if ego_refused else ego_bins(res, len(frames), fps, scale_rel), samples=samples)
+    if ground:
+        ok = sum(1 for f in fits if f and f["ok"])
+        out.update(car_ruler=mode, marking=str(a.marking), ground_ruler_params=GROUND_RULER, rel_scale_sigma=0.0,
+                   ground_fits=dict(samples=len(samples), with_rows=sum(1 for x in rows if x is not None and len(x)), ok=ok))
+        if ego_refused:
+            out.update(ego_refused=ego_refused)
+    elif mode != "single":
         out.update(car_ruler=mode, k_car=k_car, car_ruler_far_cycles=n_far)
     if ego_mode != "single":
         out.update(ego_ruler=ego_mode, ego_ruler_params=EGO_RULER)
+    if smooth != "none":
+        out.update(distance_smooth=smooth, distance_smooth_params=DIST_SMOOTH[smooth])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(out))
     n_obj = sum(len(s["objects"]) for s in samples)
@@ -400,8 +580,10 @@ def cmd_measure(a):
     for s in samples:
         for o in s["objects"]:
             lanes[o["lane"]] = lanes.get(o["lane"], 0) + 1
-    print(f"wrote {a.out}: k {k:.4f}, ruler reach {reach:.1f} m, {len(samples)} samples, {n_obj} car readings, "
-          f"{len(by_id)} tracks, by lane {dict(sorted(lanes.items(), key=lambda x: (x[0] is None, x[0] or 0)))}")
+    ruler = f"ground fit accepted on {out['ground_fits']['ok']}/{len(samples)} samples" if ground else f"k {k:.4f}"
+    print(f"wrote {a.out}: {ruler}, ruler reach {reach:.1f} m, {len(samples)} samples, {n_obj} car readings, "
+          f"{len(by_id)} tracks, by lane {dict(sorted(lanes.items(), key=lambda x: (x[0] is None, x[0] or 0)))}"
+          + (f" (no ego speed: {ego_refused[:90]})" if ego_refused else ""))
 
 
 # ------------------------------------------------------------------ measure, method C (lane markings only)
@@ -470,7 +652,7 @@ def cmd_measure_c(a):
     hw = int(a.half_win) if getattr(a, "half_win", None) else PARAMS["half_win"]
     scale_rel = ruler_scale_sigma(res)
     by_id = track_speeds(samples, res["speeds"], scale_rel, hw, pc["rel_sigma_mult"], pc["ego_sigma_mult"])
-    out = dict(method="c", params=dict(PARAMS, half_win=hw, dedup_iou=a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"]), params_c=pc, marking=str(a.marking), tracks=str(a.tracks),
+    out = dict(method="c", params=params_out(half_win=hw, dedup_iou=a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"]), params_c=pc, marking=str(a.marking), tracks=str(a.tracks),
                A=res["A"], cycle_m=res["cycle_m"], ruler_reach_m=reach, ruler_scale_sigma=scale_rel, fps=fps,
                n_frames=len(frames), ego=ego_bins(res, len(frames), fps, scale_rel, p=dict(PARAMS, **pc)),
                samples=samples)
@@ -600,6 +782,11 @@ C2K19_DEV = _c2k19_dev()
 # 1164 x 874, principal point at the centre) and the radar 1.52 m ahead of the camera (RADAR_TO_CAMERA). Used
 # only to match radar returns to boxes by their bearing -- never in a measurement.
 C2K19_CAM = dict(f=910.0, cx=582.0, radar_to_camera_m=1.52)
+
+def params_out(**extra):
+    """The parameters written into an output file: PARAMS without the scoring-only radar_processing_m (added 2026-10-02,
+    after the second and third versions were sealed), so measurement outputs stay byte-identical to theirs."""
+    return dict({k: v for k, v in PARAMS.items() if k != "radar_processing_m"}, **extra)
 
 
 def c2k19_score(cars, tdir, return_rows=False):
@@ -935,8 +1122,9 @@ def main():
     m = sub.add_parser("measure")
     for x in ("--frames", "--tracks", "--dash", "--depth-cache", "--out"):
         m.add_argument(x, required=True)
-    m.add_argument("--car-ruler", choices=("single", "far"), default=None,
-                   help="ruler the cars are read with (default PARAMS car_ruler = single)")
+    m.add_argument("--car-ruler", choices=("single", "far", "ground"), default=None,
+                   help="ruler the cars are read with (default PARAMS car_ruler = single); "
+                        "ground = fitted to the marking run's road rows (GROUND_RULER, needs --marking)")
     m.add_argument("--k-guard", type=float, default=None, help="refuse k outside [1/g, g] (default PARAMS k_guard = off)")
     m.add_argument("--dedup-iou", type=float, default=None, help="default PARAMS dedup_iou; 0 reproduces older outputs")
     m.add_argument("--half-win", type=int, default=None,
@@ -944,6 +1132,10 @@ def main():
     m.add_argument("--ego-ruler", choices=("single", "local"), default=None,
                    help="2026-10-01: ruler the ego speed is read with (default single = the second version); "
                         "local = k from the cycles within +-2.5 s of each reading (local_ruler_speeds)")
+    m.add_argument("--marking", default=None, help="the marking run (*_run.json) the ground car ruler is fitted to")
+    m.add_argument("--distance-smooth", choices=("none", *DIST_SMOOTH), default="none",
+                   help="2026-10-02: reported distance smoothed along each track (ts16: Theil-Sen over +-0.8 s); "
+                        "relative speed still from the raw readings")
     mc = sub.add_parser("measure-c", help="method C (lane markings only) distances on the same tracks")
     for x in ("--frames", "--tracks", "--marking", "--out"):
         mc.add_argument(x, required=True)
