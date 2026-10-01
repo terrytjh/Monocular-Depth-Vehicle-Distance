@@ -264,6 +264,42 @@ def track_speeds(samples, ego_speeds, scale_rel, hw, m_rel, m_ego):
     return by_id
 
 
+# 2026-10-01, the ruler the EGO speed is read with (measure --ego-ruler local; off by default, so every output of the second
+# version is unchanged byte for byte). Kept out of PARAMS for that reason: PARAMS is written into every cars file.
+EGO_RULER = dict(
+    w_s=2.5,                 # cycles within +-this many seconds of a reading ...
+    n_min=20,                # ... at least this many of them, else the clip's k (both values: method C's registered local ruler)
+    guard=1.5,               # k_local / k outside [1/guard, guard] -> the clip's k for that reading. A window can lock onto
+                             # half the legal cycle (seen in the cycles alone on a development segment: k_local / k up to
+                             # 1.84), which doubles k_local; ordinary drift on the development segments is 0.92-1.09
+                             # (p5-p95). The factor is the registered k guard's.
+)
+
+
+def local_ruler_speeds(res, w=EGO_RULER["w_s"], n_min=EGO_RULER["n_min"], guard=EGO_RULER["guard"]):
+    """2026-10-01. The dash run's pairwise ego readings with a ruler that follows the clip in time: each reading is
+    k x shift / time, so it is multiplied by k_local(t) / k, where k_local = legal cycle / median of the cycles of the
+    accepted lines measured within +-w s of the reading (at least n_min of them, and k_local / k within the guard;
+    otherwise the clip's k is kept). The edges themselves were matched with the clip's k (depth_dash_scale.edge_speeds);
+    only the conversion to km/h follows k_local. The depth model's scale drifts over seconds (second version, blind test: per-second ego errors correlated
+    0.60 / 0.45 / 0.34 at 1 / 2 / 3 s); one k for the whole clip cannot follow that. Uses nothing but the clip."""
+    k, L, step, fps = res["k"], res["cycle_m"], res["step"], res["fps"]
+    cyc = [(c["n"] * step / fps, c["period"]) for c in res["periods"] if c["side"] in res.get("lines_used", [])]
+    t = np.array([a for a, _ in cyc], float)
+    v = np.array([b for _, b in cyc], float)
+    out = []
+    for s in res["speeds"]:
+        s = dict(s)
+        if s["kmh"] is not None:
+            m = np.abs(t - s["t_s"]) <= w
+            if m.sum() >= n_min:
+                r = (L / float(np.median(v[m]))) / k
+                if 1 / guard <= r <= guard:
+                    s["kmh"] = s["kmh"] * r
+        out.append(s)
+    return out
+
+
 def car_ruler_factor(cycles, L, mode, p=PARAMS):
     """cycles: (near end in metres by the single ruler, period in the ruler's own units) of the cycles that set it.
     Returns (factor on the single ruler, number of far cycles): 1.0 for mode "single" or too few far cycles."""
@@ -341,12 +377,17 @@ def cmd_measure(a):
         samples.append(dict(fi=fi, t=fi / fps, objects=objs))
     hw = int(a.half_win) if getattr(a, "half_win", None) else PARAMS["half_win"]
     scale_rel = ruler_scale_sigma(res)
+    ego_mode = getattr(a, "ego_ruler", None) or "single"
+    if ego_mode == "local":
+        res = dict(res, speeds=local_ruler_speeds(res))
     by_id = track_speeds(samples, res["speeds"], scale_rel, hw, PARAMS["rel_sigma_mult"], PARAMS["ego_sigma_mult"])
     out = dict(params=dict(PARAMS, half_win=hw, dedup_iou=a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"]), dash=str(a.dash), tracks=str(a.tracks), k=k, cycle_m=res["cycle_m"],
                ruler_reach_m=reach, ruler_scale_sigma=scale_rel, fps=fps, n_frames=len(frames),
                ego=ego_bins(res, len(frames), fps, scale_rel), samples=samples)
     if mode != "single":
         out.update(car_ruler=mode, k_car=k_car, car_ruler_far_cycles=n_far)
+    if ego_mode != "single":
+        out.update(ego_ruler=ego_mode, ego_ruler_params=EGO_RULER)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(out))
     n_obj = sum(len(s["objects"]) for s in samples)
@@ -891,6 +932,9 @@ def main():
     m.add_argument("--dedup-iou", type=float, default=None, help="default PARAMS dedup_iou; 0 reproduces older outputs")
     m.add_argument("--half-win", type=int, default=None,
                    help="relative speed over 2 * half_win + 1 samples (default PARAMS half_win = 4, i.e. 1.6 s)")
+    m.add_argument("--ego-ruler", choices=("single", "local"), default=None,
+                   help="2026-10-01: ruler the ego speed is read with (default single = the second version); "
+                        "local = k from the cycles within +-2.5 s of each reading (local_ruler_speeds)")
     mc = sub.add_parser("measure-c", help="method C (lane markings only) distances on the same tracks")
     for x in ("--frames", "--tracks", "--marking", "--out"):
         mc.add_argument(x, required=True)
