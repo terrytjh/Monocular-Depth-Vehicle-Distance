@@ -35,6 +35,11 @@ METHODS = ("depth_v2", "depth_v3", "marking")
 LABEL = {"depth_v2": "深度 × 虛線尺(第二版)", "depth_v3": "深度 × 虛線尺 + 局部尺(第三版)", "marking": "標線幾何法"}
 
 H1029 = json.loads((O / "heldout_hs1029/manifest.json").read_text())
+# the 20251029 cases are named only by a code (A-H); the key from case number to code
+# is kept outside version control (data/output/dash_scale/heldout_hs1029/case_codes.json) and never printed
+CODE = json.loads((O / "heldout_hs1029/case_codes.json").read_text())
+KEY = {c: k for k, c in CODE.items()}
+TIMEBASE_CONFLICT = "E"     # the case whose report frame rate (10.35) differs from its video file (30) by 2.9x
 CASES = [  # (key, short name, status of the answers, files per method, seal)
     ("hs1230car_002", "20251230-002", "開發片", dict(
         depth_v2=O / "dev/v2/da3_metric_hs1230car_002.json",
@@ -49,14 +54,14 @@ CASES = [  # (key, short name, status of the answers, files per method, seal)
         depth_v2=O / f"heldout_hs/hs{c}_dash.json", marking=O / f"heldout_hs/hs{c}_run.json"),
      O / "heldout_hs/seal.json") for c in ("003", "004", "005")
 ] + [
-    (m["key"], "20251029-" + m["key"].split("_", 1)[1], "保留片(第三版 3.2)", dict(
+    (m["key"], "20251029-" + CODE[m["key"]], "保留片(第三版 3.2)", dict(
         depth_v2=O / f"heldout_hs1029/{m['key']}_dash.json", depth_v3=O / f"heldout_hs1029/{m['key']}_dash_v3.json",
         marking=O / f"heldout_hs1029/{m['key']}_run.json"), O / "heldout_hs1029/seal.json") for m in H1029
 ]
 # numbers reported before (docs/TERRY_DEV_LOG.md, docs/DEPTH_DASH_V2_RESULTS.md section 8, heldout_hs1029/score.json)
 REPORTED = {("hs1230car_002", "depth_v2"): (1.38, 7), ("hs1230car_006", "depth_v2"): (1.70, 12),
             ("hs1230car_006", "marking"): (2.20, 13), ("hs1230car_005", "marking"): (2.73, 11),
-            ("hs1029car_113-44-07", "depth_v2"): (39.17, 5), ("hs1029car_113-44-07", "depth_v3"): (38.09, 5)}
+            (KEY["E"], "depth_v2"): (39.17, 5), (KEY["E"], "depth_v3"): (38.09, 5)}
 
 
 def sha(p):
@@ -169,8 +174,8 @@ def figure(seg_rows, case_rows, path):
     fig, ax = plt.subplots(1, 3, figsize=(19, 6.3), gridspec_kw=dict(width_ratios=[1, 1, 1.25]))
 
     ok = [r for r in seg_rows if r["gap_kmh"] is not None]
-    normal = [r for r in ok if r["key"] != "hs1029car_113-44-07"]
-    conflict = [r for r in ok if r["key"] == "hs1029car_113-44-07"]
+    normal = [r for r in ok if r["key"] != KEY[TIMEBASE_CONFLICT]]
+    conflict = [r for r in ok if r["key"] == KEY[TIMEBASE_CONFLICT]]
     a = ax[0]
     for m in METHODS:
         pts = [r for r in normal if r["method"] == m]
@@ -227,11 +232,11 @@ def figure(seg_rows, case_rows, path):
     a.text(.5, 13.1, "開發片", ha="center", fontsize=8.5)
     a.text(3, 13.1, "保留片(白天國道 / 夜間)", ha="center", fontsize=8.5)
     a.axvline(4.5, color="0.6", lw=.8)
-    a.text(9, 13.1, "保留片(高雄市區事故)", ha="center", fontsize=8.5)
+    a.text(9, 13.1, "保留片(市區事故)", ha="center", fontsize=8.5)
     h, l = a.get_legend_handles_labels()
     a.legend(h, l, fontsize=8, loc="center right")
     if conflict:
-        a.annotate("113-44-07:表格幀率 10.35 與影片檔 30 差 2.9 倍(時基衝突)", xy=(x[names.index('20251029-113-44-07')], 12),
+        a.annotate(f"{TIMEBASE_CONFLICT} 案:表格幀率與影片檔差 2.9 倍(時基衝突)", xy=(x[names.index("20251029-" + TIMEBASE_CONFLICT)], 12),
                    xytext=(1.0, 9.0), fontsize=8, arrowprops=dict(arrowstyle="->", lw=.8))
     a.set_title("每一案的平均差距(大於 12 的截斷並標數字)")
     fig.suptitle("海盛汽車行車紀錄器:自車速 本方法 與 人工畫格法 的差距(人工畫格法本身每段約 ±1 格的解析度)", fontsize=13)
@@ -248,10 +253,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     seg_rows, case_rows = collect()
     check_reproduces(case_rows)
+    strip = lambda rows: [{k: v for k, v in r.items() if k != "key"} for r in rows]     # coded names only
     with open(out / "haisheng_gap_segments.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=list(seg_rows[0]))
-        w.writeheader(), w.writerows(seg_rows)
-    (out / "haisheng_gap_cases.json").write_text(json.dumps(case_rows, indent=1, ensure_ascii=False))
+        w = csv.DictWriter(f, fieldnames=[k for k in seg_rows[0] if k != "key"])
+        w.writeheader(), w.writerows(strip(seg_rows))
+    (out / "haisheng_gap_cases.json").write_text(json.dumps(strip(case_rows), indent=1, ensure_ascii=False))
     (out / "haisheng_gap_table.md").write_text(table_md(case_rows) + "\n")
     print(table_md(case_rows))
     figure(seg_rows, case_rows, out / "haisheng_gap.png")
