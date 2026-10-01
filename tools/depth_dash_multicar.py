@@ -93,6 +93,11 @@ PARAMS = dict(
     radar_offset_m=2.37,     # comma2k19 radar ranges start at the front of the car (openpilot v0.5.7 radar_interface):
                              # camera 1.52 m behind the radar (RADAR_TO_CAMERA) + tyre contact line 0.85 m ahead of the
                              # rear face (av2_offset_m); fixed in advance, never fitted to the radar
+    radar_processing_m=0.0,  # 2026-10-02: comma2k19's processed radar range already includes openpilot's RDR_TO_LDR = 2.70 m
+                             # (decoded from the dataset's own raw_can: LONG_DIST + 2.700 on every message of both cars).
+                             # 0.0 keeps the second / third versions' registered scoring; --truth corrected subtracts 2.70 from
+                             # every radar range before the offsets above, i.e. truth = range - 0.33 m, bearing range - 1.18 m
+                             # (score-batch --truth-offset corrected).
     av2_offset_m=0.85,       # tyre contact line vs the lidar cuboid's rear face: ray through our box's bottom centre
                              # (AV2 factory calibration) meeting the ground under the car, open AV2 logs, rear face
                              # <= 25 m: median +0.85 m, n 343, per log -0.4..+1.0 (dev/contact_offset_av2.py, 12:50)
@@ -618,7 +623,8 @@ def c2k19_score(cars, tdir, return_rows=False):
         if f < len(can) and abs(v + can[f]) > P["moving_ms"] and d > 0 and lane_of_y(y) is not None:
             radar.setdefault(f, []).append((int(r["track_id"]), d, y, v))
             by_track.setdefault(int(r["track_id"]), {})[f] = (d, v)
-    off, reach, fps, cam = P["radar_offset_m"], cars["ruler_reach_m"] or 0.0, cars["fps"], C2K19_CAM
+    off, reach, fps, cam = P["radar_offset_m"] - P["radar_processing_m"], cars["ruler_reach_m"] or 0.0, cars["fps"], \
+        dict(C2K19_CAM, radar_to_camera_m=C2K19_CAM["radar_to_camera_m"] - P["radar_processing_m"])
     cyc = cars.get("cycle_m") or json.loads(Path(cars["dash"]).read_text())["cycle_m"]
     pairs, total, found, du_signed = [], 0, 0, []
     for s in cars["samples"]:
@@ -693,6 +699,8 @@ def cmd_score_batch(a):
     """comma2k19, many segments at once: every segment of --list is reported, a segment with no cars file (ruler refused,
     or measurement missing) is counted as refused with its reason; the pooled summary counts every matched pair once.
     Blind segments need --verify-sealed (all their cars files are checked against the seal before any truth is read)."""
+    if getattr(a, "truth_offset", "registered") == "corrected":
+        PARAMS["radar_processing_m"] = 2.70
     tags = [l.strip() for l in open(a.list) if l.strip() and not l.startswith("#")]
     cdir = Path(a.cars_dir)
     have = {t: cdir / f"{t}{a.suffix}" for t in tags if (cdir / f"{t}{a.suffix}").exists()}
@@ -718,7 +726,8 @@ def cmd_score_batch(a):
         ego += [dict(e, seg=t) for e in eg]
         found += r["found"]["matched"]
         total += r["found"]["truth_inside_reach"]
-    pooled = assemble(pairs, ego, found, total, None, "per segment", PARAMS["radar_offset_m"], PARAMS["ego_bin_s"])
+    pooled = assemble(pairs, ego, found, total, None, "per segment", PARAMS["radar_offset_m"] - PARAMS["radar_processing_m"],
+                      PARAMS["ego_bin_s"])
     seg_med = [np.median(np.abs([p["err"] for p in pairs if p["seg"] == t and not p["far"] and p["lane"] in (-1, 0, 1)]))
                for t in per if sum(1 for p in pairs if p["seg"] == t and not p["far"] and p["lane"] in (-1, 0, 1)) >= 10]
     out = dict(segments=len(tags), scored=len(per), refused=refused, pooled=pooled,
@@ -955,6 +964,8 @@ def main():
     sb.add_argument("--truth-root", default=str(ROOT / "data/output/c2k19_truth"))
     sb.add_argument("--verify-sealed", default="")
     sb.add_argument("--out", default="")
+    sb.add_argument("--truth-offset", choices=("registered", "corrected"), default="registered",
+                    help="corrected: remove the 2.70 m that comma2k19's processed radar range already includes")
     rt = sub.add_parser("retrack")
     rt.add_argument("--tracks", required=True)
     rt.add_argument("--out", required=True)
