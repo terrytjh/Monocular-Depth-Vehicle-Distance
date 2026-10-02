@@ -11,3 +11,5 @@ are here so the hashes are on record. The scorers refuse any prediction whose ha
 | `heldout_hs_003-005_seal.json` | Haisheng 20251230 003-005, held-out (addendum 1 of the second version) | 2026-09-30 18:36:16 | 6 |
 | `heldout_hs1029_seal.json` | Haisheng 20251029 eight car cases, held-out (`docs/DEPTH_DASH_V3_PREREG.md` 3.2); case numbers replaced by codes A-H, hashes unchanged, sha256 of the original file recorded inside | 2026-10-01 07:09:35 | 17 |
 | `blind_v3_seal.json` | third version, comma2k19 Chunk_2 194 blind segments (`docs/DEPTH_DASH_V3_PREREG.md`) | 2026-10-01 14:59:43 | 969 |
+| `blind_v4_tw_seal.json` | fourth version, 18 Taiwanese web clips, ego speed only (`docs/DEPTH_DASH_V4_PREREG.md` 2.2) | 2026-10-02 02:06:14 | 86 |
+| `blind_v4_seal.json` | fourth version, comma2k19 Chunk_4 205 segments (`docs/DEPTH_DASH_V4_PREREG.md` 2.1) | 2026-10-02 06:37:54 | 1155 |
