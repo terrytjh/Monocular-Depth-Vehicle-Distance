@@ -114,6 +114,13 @@ BLIND_AV2 = ("0b86f508", "42f92807", "544a8102", "e1d68dde")        # sealed log
 
 # Registered second version, blind comma2k19 segments (sealed before their truth existed)
 BLIND = "data/output/dash_scale/blind_v2"
+# later batches (--batch, --cars-suffix, --version-label, --corrected-truth; defaults = the second version as before)
+BLIND_PRED_SUB = "pred"
+CARS_SFX = "_cars.json"
+HEADER_BLIND = "深度模型 × 法定虛線尺(第二版,已登錄)"
+TRUTH_NOTE = "距離已加固定偏移 2.37 m"
+GROUND_RULER = False
+INSET = True                                # --no-inset: same layout, the depth inset left out (close-up crops)
 BLIND_OUT = ROOT / BLIND / "demo"
 
 # colours (hex; rgb for text, bgr for OpenCV)
@@ -355,10 +362,10 @@ def check_open(name, clip):
 
 def blind_clip(tag, label, seal):
     """Clip dict of one blind comma2k19 segment of the registered run (the files that were sealed)."""
-    p = f"{BLIND}/pred/{tag}"
+    p = f"{BLIND}/{BLIND_PRED_SUB}/{tag}" if BLIND_PRED_SUB else f"{BLIND}/{tag}"
     return dict(kind="c2k19", tag=tag, title=label, blind=True, seal=str(seal),
-                dash=f"{p}_dash.json", cars=f"{p}_cars.json", tracks=f"{p}_tracks.json",
-                run=f"{p}_run.json", cars_c=f"{p}_cars_c.json", cache=f"data/output/dash_scale/cache/blind_v2/{tag}")
+                dash=f"{p}_dash.json", cars=f"{p}{CARS_SFX}", tracks=f"{p}_tracks.json",
+                run=f"{p}_run.json", cars_c=f"{p}_cars_c.json", cache=f"data/output/dash_scale/cache/{Path(BLIND).name}/{tag}")
 
 
 def check_blind(clip, keys):
@@ -589,9 +596,10 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
         if sg is not None:
             line2.append((f"   人工畫格法 {sg['speed_kmh']:.1f} km/h(第 {sg['seg']} 段)", C_TRUTH, cv.fb))
         if blind:
-            line1 = [("深度模型 × 法定虛線尺(第二版,已登錄)", C_WHITE, cv.fh),
+            line1 = [(HEADER_BLIND, C_WHITE, cv.fh),
                      (f"   {clip['title']}", C_WHITE, cv.fb), (f"   t = {t:5.1f} s", C_SOFT, cv.f)]
-            line3 = [(f"尺 k = {k:.3f}", C_WHITE, cv.fb), (f"   量車的尺 k_car = {k_car:.3f}", C_WHITE, cv.fb),
+            line3 = [(f"尺 k = {k:.3f}", C_WHITE, cv.fb),
+                     (("   量車:路面校正 a·z + b(每 ±2.5 s 擬合)" if GROUND_RULER else f"   量車的尺 k_car = {k_car:.3f}"), C_WHITE, cv.fb),
                      (f"   可信範圍 {reach:.0f} m" if reach else "   可信範圍 —", C_WHITE, cv.fb),
                      (f"   法定虛線週期 {res['cycle_m']:g} m", C_SOFT, cv.f)]
             hdr_lines = [line1, line2, line3, [(seal_text(clip, seal), C_SOFT, cv.fsmall)]]
@@ -627,18 +635,18 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
             placed.append((0, hdr_h, sw, hdr_h + sh))
         draw_cars(cv, img, s, fi, now, tracks, truth_of, truth_name, placed, hdr_h)
         # depth inset, top right under the header
-        if depth is not None:
+        if depth is not None and INSET:
             ins = depth_inset(depth, k_ins, overlay, (h, w), (iw, ih))
             img[iy:iy + ih, ix:ix + iw] = ins
             cv2.rectangle(img, (ix - 1, iy - 1), (ix + iw, iy + ih), (255, 255, 255), 1)
             cv.fill(ix, iy, ix + iw, iy + cv.line_h(cv.fsmall) + 2, "#000000", 0.55)
-            cv.runs(ix + 4, iy + 1, [("深度圖 × k_car(紅近、藍遠)" if blind else "深度圖 × k(紅近、藍遠)",
+            cv.runs(ix + 4, iy + 1, [("深度圖 × k_car(紅近、藍遠)" if blind and not GROUND_RULER else "深度圖 × k(紅近、藍遠)",
                                       C_WHITE, cv.fsmall)])
         header(cv, hdr_lines)
         items = [(C_EGO, "本車道的車", C_WHITE), (C_OTHER, "其他車道的車", C_WHITE),
                  (C_FAR, "尺的範圍外:只給距離", C_WHITE), (C_LINE, "追到的本車道線", C_WHITE)]
         if blind:
-            items.append((None, "黃字 = 真值:雷達(距離已加固定偏移 2.37 m)與定位車速", C_TRUTH))
+            items.append((None, f"黃字 = 真值:雷達({TRUTH_NOTE})與定位車速", C_TRUTH))
         elif truth_name == "雷達":
             items.append((None, "黃字 = 雷達(真值,距離已加固定偏移 2.37 m)", C_TRUTH))
         elif truth_name == "光達":
@@ -674,7 +682,26 @@ def main():
     ap.add_argument("--still-at", type=float, default=None, help="render only the frame at this time (s) to a PNG")
     ap.add_argument("--still-out", default=None)
     blind_args(ap)
+    ap.add_argument("--batch", default=None, help="a later blind batch folder (files directly in it, cache under cache/<name>)")
+    ap.add_argument("--cars-suffix", default="_cars.json", help="e.g. _cars_v4.json (the ground ruler)")
+    ap.add_argument("--version-label", default=None, help="header text, e.g. 深度模型 × 法定虛線尺(第四版,已登錄)")
+    ap.add_argument("--no-inset", action="store_true", help="leave the depth inset out (labels keep their places)")
+    ap.add_argument("--corrected-truth", action="store_true", help="truth = radar - 0.33 m (comma2k19 range includes 2.70 m)")
     a = ap.parse_args()
+    global BLIND, BLIND_PRED_SUB, CARS_SFX, HEADER_BLIND, TRUTH_NOTE, GROUND_RULER, INSET
+    if a.batch:
+        BLIND, BLIND_PRED_SUB = a.batch.rstrip("/"), ""
+        if a.seal == "data/output/dash_scale/blind_v2/seal.json":
+            a.seal = f"{BLIND}/seal.json"
+    CARS_SFX = a.cars_suffix
+    GROUND_RULER = CARS_SFX in ("_cars_v4.json", "_cars_v5.json")
+    if a.version_label:
+        HEADER_BLIND = a.version_label
+    INSET = not a.no_inset
+    if a.corrected_truth:
+        import depth_dash_multicar as M
+        M.PARAMS["radar_processing_m"] = 2.70
+        TRUTH_NOTE = "距離 = 雷達 \u2013 0.33 m,更正後的真值"
     if a.blind_tag:
         if not (a.label and a.short):
             ap.error("--blind-tag needs --label and --short")
