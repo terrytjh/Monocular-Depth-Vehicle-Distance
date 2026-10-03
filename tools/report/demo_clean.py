@@ -123,10 +123,16 @@ def main():
         f0 = int(round(a.start * fps))
         todo = range(f0, min(n, f0 + int(round((a.duration or 10) * fps))))
     elif a.best_window and a.still_at is None:     # the window with the most cars carrying a speed (predictions only)
-        cnt = [sum(1 for o in x["objects"] if not o["far"] and o.get("abs_kmh") is not None) for x in samples]
+        cnt = [sum(1 for o in x["objects"] if not o["far"] and (o.get("abs_kmh") is not None or o.get("rel_kmh") is not None))
+               for x in samples]
+        cov = [(cache / f"{frames[x['fi']].stem}.npy").exists() and len(x["objects"]) > 0 for x in samples]
         span = max(1, int(round(a.best_window * fps)))
-        best = max(range(0, max(1, n - span), max(1, int(fps))),
-                   key=lambda f0: sum(c for x, c in zip(samples, cnt) if f0 <= x["fi"] < f0 + span))
+        step = max(1, int(round(fps / 5)))
+        full = [f0 for f0 in range(0, max(1, n - span), step)       # every sample in the window has depth and cars
+                if all(ok for x, ok in zip(samples, cov) if f0 - fps / 4 <= x["fi"] < f0 + span)]
+        if not full:
+            raise SystemExit(f"no {a.best_window:g} s window with a depth map and cars throughout")
+        best = max(full, key=lambda f0: sum(c for x, c in zip(samples, cnt) if f0 <= x["fi"] < f0 + span))
         todo = range(best, min(n, best + span))
         print(f"window {best / fps:.1f}-{(best + span) / fps:.1f} s")
     cur, dpanel = None, None

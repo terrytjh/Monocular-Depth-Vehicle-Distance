@@ -5,6 +5,7 @@ cars' speed and the ego speed all agree best with the truth, with enough on scre
 Per window (sliding by 1 s): distance pairs inside the reach (the scorer's 50 % gate), at least MIN_D, median |error|;
 other cars' absolute speed, at least MIN_V, median |error|; ego speed seconds, at least MIN_E, mean |error|.
 Score = dist% / 5 + speed km/h / 4 + ego km/h / 3 (each over a typical value); the best window per route.
+Only windows where every sample has its depth map and at least one car (so the demo shows depth and distances throughout).
 
   python3 tools/report/pick_demo_windows.py --batch data/output/dash_scale/blind_v5 --top 5
 """
@@ -18,6 +19,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import depth_dash_multicar as M  # noqa: E402
+import depth_dash_scale as D  # noqa: E402
 
 W, MIN_D, MIN_V, MIN_E = 10.0, 20, 10, 8
 
@@ -52,7 +54,14 @@ def main():
         v = [(p["t"], abs(p["abs"] - p["abs_truth"])) for p in pairs if p.get("abs") is not None and not p["far"]]
         e = [(r["t0"], abs(r["kmh"] - r["truth"])) for r in ego if r.get("kmh") is not None and r.get("truth") is not None]
         route = t.rsplit("_", 1)[0]
+        res = json.loads((B / f"{t}_dash.json").read_text())
+        fd = Path(res["frames_dir"])
+        frames = D.list_frames(fd if fd.is_absolute() else ROOT / fd)
+        cache = ROOT / "data/output/dash_scale/cache" / B.name / t
+        cov = [((cache / f"{frames[x['fi']].stem}.npy").exists() and len(x["objects"]) > 0, x["t"]) for x in c["samples"]]
         for s0 in np.arange(0, 60 - W + 1, 1.0):
+            if not all(ok for ok, tt in cov if s0 - 0.25 <= tt < s0 + W):
+                continue
             win = lambda xs: [x for tt, x in xs if s0 <= tt < s0 + W]   # noqa: E731
             dd, vv, ee = win(d), win(v), win(e)
             if len(dd) < MIN_D or len(vv) < MIN_V or len(ee) < MIN_E:

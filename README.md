@@ -14,24 +14,15 @@
 **研究歷程**:計畫書於 2026 年寒假撰寫。2026-09-30 之前的工作屬於團隊專題(見下方「團隊專題」);本 repo 自 2026-09-30 起只收錄我個人計畫的方法與程式。每一版都先 commit 登錄文件，再預測、封存、評分，
 commit 與封存的時間可以逐一核對(`docs/seals/`)。
 
-## Demo(第五、六版盲測片段)
+## Demo
 
-comma2k19 Chunk_5 盲測片段中,距離、他車車速與自車速誤差最小的 10 秒(`tools/report/pick_demo_windows.py`;預測封存後才產生真值)。
-上:畫面與方法的輸出(每台車的距離與車速,左上為自車速);下:同一刻的深度圖。白框 = 30 m 外,只給距離。
+comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車速,左上為自車速);下:同一刻的深度圖。
 
-**1.** 距離中位誤差 0.8%、他車車速 1.0 km/h、自車速 0.8 km/h
+![Demo 1](docs/media/demo_w1.webp)
 
-![示範片段 1](docs/media/demo_w1.webp)
+![Demo 2](docs/media/demo_w2.webp)
 
-**2.** 距離中位誤差 1.3%(56 筆)、他車車速 1.3 km/h(44 筆)、自車速 1.2 km/h
-
-![示範片段 2](docs/media/demo_w2.webp)
-
-**3.** 距離中位誤差 0.6%、他車車速 1.2 km/h、自車速 2.1 km/h
-
-![示範片段 3](docs/media/demo_w3.webp)
-
-整批的結果見下方「結果」與 `docs/DEPTH_DASH_V5_RESULTS.md`。
+![Demo 3](docs/media/demo_w3.webp)
 
 ## 兩個方法
 
