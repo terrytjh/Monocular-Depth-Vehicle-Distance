@@ -11,7 +11,7 @@ Two jobs, kept apart on purpose:
           The pose speed (2026-09-30) is |global_pose/frame_velocities| per frame; on seg10/seg21
           the CAN speed reads about 1.1 % below it, so scoring uses the pose speed first.
 
-What the radar columns mean is read off the data, not taken from anyone's notes.
+What the radar columns mean follows openpilot's public source, checked against the data.
 processed_log/CAN/radar/value holds 7 numbers per return, laid out like openpilot's
 RadarData.RadarPoint (cereal/log.capnp): dRel, yRel, vRel, aRel, yvRel, trackId, and a
 0/1 flag. `truth` checks the parts of that claim the data can check:

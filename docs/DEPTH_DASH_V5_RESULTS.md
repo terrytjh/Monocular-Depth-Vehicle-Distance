@@ -102,7 +102,7 @@
   左右一道 6.6 / 6.6 / 17.9 / 7.0%。
   **事後檢查(不是登錄的分析)**:框底在畫面高度 97% 以下、寬度超過畫面 80% 的框,是自己車的引擎蓋被偵測成車(7 段,
   本車道 838 筆、左右一道 442 筆,誤差都約 −99%);去掉這些框後,第五版關閘的本車道為 8.8%(偏差 −2.1%)、左右一道 6.3%
-  (`hood_check.py`)。這條規則是看了 Chunk_4 的大誤差畫面之後才定的,還不是方法的一部分,要寫進下一版登錄、在新資料上盲測。
+  (`tools/hood_check_v5.py`)。這條規則是看了 Chunk_4 的大誤差畫面之後才定的,還不是方法的一部分,要寫進下一版登錄、在新資料上盲測。
 - 主要組沒有輸出的 31 段:24 段是標線幾何法拒發(第四版起的路面校正需要它;其中 21 段兩把尺都拒發),7 段是尺度檢查。
 - 30 m 以外第五版偏短 18%,只標示為範圍外;第六版只改有自己的尺的讀值(34.9%)。
 - Chunk_5 全部是第二台車;這批用過之後成為開發資料。
@@ -116,3 +116,4 @@
 `data/output/dash_scale/blind_v5/`:`seal.json`、`seal_v6.json`、`radar_check.json`、
 `score_{corrected,registered}_{main,local_day,night}_{v2,v3,v4,v5,c}.json`、`score_v6_{main,local_day,night}.json`、
 `score_extra.json`、`breakdown_v{4,5}.json`(誤差拆解,事後)、`hood_check.json`(事後)、`after_run.log`。
+評分程式:`tools/depth_dash_multicar.py score-batch`、`tools/score_extra_v5.py`、`tools/v6_score.py`、`tools/hood_check_v5.py`。

@@ -14,12 +14,12 @@ commit 與封存的時間可以逐一核對(`docs/seals/`)。
 ## 兩個方法
 
 **方法一:深度模型 × 法定虛線尺**(主方法)
-單目度量深度模型(Depth Anything 3 metric)給每個像素一個距離，但它的公尺尺度會隨相機與場景偏掉。
+單目度量深度模型(Depth Anything 3 metric [3])給每個像素一個距離，但它的公尺尺度會隨相機與場景偏掉。
 車道虛線的週期是法規定的(台灣第 182 條 10 m;加州高速公路 Caltrans A20A 14.63 m;美國聯邦 MUTCD 12.19 m)，
 所以在**模型自己的深度裡**量出虛線週期 P，就得到尺:`k = 法定週期 ÷ P`，距離 = k × 模型讀值。
 自車速是同一條深度剖面上，虛線邊緣在兩張影格之間的平移。
 
-**方法二:標線幾何法，不用深度模型**(對照方法;程式與早期文件中稱「方法 C」)
+**方法二:標線幾何法，不用深度模型**(對照方法，作法引自文獻 [1, 2],不是本研究的貢獻;程式與早期文件中稱「方法 C」)
 平路、針孔相機:畫面第 y 列的路面距離 `d = A / (y − y_h)`。地平線 y_h 取兩條車道線的交點;
 A 由虛線在 `u = 1/(y − y_h)` 上的週期換算(`A = 法定週期 ÷ 週期`)。
 
@@ -145,6 +145,20 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 | `tools/band_bottom.py` | 只用畫面決定分析範圍下緣(引擎蓋、疊字) |
 | `tools/c2k19_radar_check.py` | 評分前檢查雷達距離與原始 CAN 的差是否全為 2.70 m |
 | `tools/c2k19_pool.py` | 只讀 zip 目錄列出盲測候選段，並查名稱是否出現過 |
+| `tools/score_extra_v3.py`、`tools/score_extra_v4.py`、`tools/score_extra_v5.py` | 各版結果文件中的額外評分(關閘、真值 < 30 m、配對比較與符號檢定),封存後才執行 |
+| `tools/hood_check_v5.py` | 第五版結果的事後檢查:關閘時引擎蓋被偵測成車的影響 |
 | `tools/report/demo_*.py` | 示範影片 |
 
 `tools/av1_*.py`、`tools/av2_*.py` 是 Argoverse 1/2 的下載、準備與評分;`tools/haisheng_manual_truth.py` 讀海盛的人工畫格法真值。
+
+## 參考文獻
+
+1. G. P. Stein, O. Mano, A. Shashua, "Vision-based ACC with a single camera: bounds on range and range rate accuracy,"
+   IEEE Intelligent Vehicles Symposium, 2003, pp. 120–125. https://doi.org/10.1109/IVS.2003.1212895
+2. T. N. Schoepflin, D. J. Dailey, "Dynamic camera calibration of roadside traffic management cameras for vehicle speed
+   estimation," IEEE Transactions on Intelligent Transportation Systems, vol. 4, no. 2, pp. 90–98, 2003.
+   https://doi.org/10.1109/TITS.2003.821213
+3. Lin et al., "Depth Anything 3: Recovering the Visual Space from Any Views," arXiv:2511.10647, 2025.
+   https://arxiv.org/abs/2511.10647 ;程式與模型 https://github.com/ByteDance-Seed/Depth-Anything-3
+4. 道路交通標誌標線號誌設置規則第 182 條(車道線:線段長 4 公尺、間距 6 公尺)。
+   https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=K0040014&flno=182
