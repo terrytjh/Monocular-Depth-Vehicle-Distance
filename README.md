@@ -27,7 +27,7 @@ comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車�
 ## 方法(概述)
 
 以單目度量深度模型(Depth Anything 3 [3])估計深度，並以道路上的法定車道標線作為尺度參考，不需要相機焦距與安裝高度等參數;
-另以引用文獻的標線幾何法 [1, 2] 作為對照方法。車輛偵測與追蹤使用 YOLOv8m-seg 與 BoT-SORT。
+另以引用文獻的標線幾何法 [1, 2] 作為對照，並自第四版起用它量到的路面距離校正深度模型的尺度。車輛偵測與追蹤使用 YOLOv8m-seg 與 BoT-SORT。
 
 ## 驗證方式:先登錄、再預測、封存、最後才看答案
 
@@ -48,8 +48,8 @@ comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車�
 | 第二版 | 2026-09-30 19:54(`v2-prereg`) | 深度模型 × 法定標線尺度(第一個登錄版本);標線幾何法為對照 | comma2k19 149 段(答案從未讀過)、Argoverse 2 四支 | 預測封存(`v2-sealed`)→ 評分(`v2-results`) |
 | 第二版追記 1 | 2026-10-01(`v2-addendum1`) | 方法不變;台灣保留片(人工畫格法)只評自車速 | — | 已評分 |
 | 第三版 | 2026-10-01 15:03(`v3-prereg`) | **只改一項**:自車速的尺度估計 | comma2k19 Chunk_2 194 段(另一台車，答案從未讀過) | 已評分(`docs/DEPTH_DASH_V3_RESULTS.md`) |
-| 第四版 | 2026-10-02 04:02(`bec5f39`) | **改用正確的雷達真值**(見下);他車距離的校正與平滑 | comma2k19 Chunk_4 205 段、台灣網路行車影片 18 支 | 已評分(`docs/DEPTH_DASH_V4_RESULTS.md`) |
-| 第五版 | 2026-10-02 15:17(`ce7d4ec`) | 尺度一致性檢查;自車速結合兩個方法 | comma2k19 Chunk_5 211 段 | 已評分(`docs/DEPTH_DASH_V5_RESULTS.md`) |
+| 第四版 | 2026-10-02 04:02(`bec5f39`) | **改用正確的雷達真值**(見下);他車距離改以標線幾何法量到的路面距離校正，並平滑軌跡 | comma2k19 Chunk_4 205 段、台灣網路行車影片 18 支 | 已評分(`docs/DEPTH_DASH_V4_RESULTS.md`) |
+| 第五版 | 2026-10-02 15:17(`ce7d4ec`) | 尺度一致性檢查;自車速取深度法與標線幾何法的平均 | comma2k19 Chunk_5 211 段 | 已評分(`docs/DEPTH_DASH_V5_RESULTS.md`) |
 | 第六版 | 2026-10-02 21:46(`819429c`) | **只改一項**:30 m 以外的距離修正 | 與第五版同一批(登錄時沒有任何真值) | 已評分(同上) |
 
 文件:各版的 `docs/DEPTH_DASH_V*_PREREG.md`(登錄)與 `docs/DEPTH_DASH_V*_RESULTS.md`(結果);
@@ -143,7 +143,7 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 | 檔案 | 用途 |
 |---|---|
 | `tools/depth_dash_scale.py` | 深度法:尺度與自車速 |
-| `tools/marking_geometry.py` | 標線幾何法(對照方法) |
+| `tools/marking_geometry.py` | 標線幾何法(對照方法;第四版起也用於路面校正) |
 | `tools/depth_dash_multicar.py` | 偵測與追蹤、每台車的距離與速度、評分 |
 | `tools/depth_backends.py` | 五個深度模型的統一介面 |
 | `tools/c2k19_extract.py` | comma2k19 影格(ffmpeg)與真值(CAN、定位、雷達)，兩者分開放 |
