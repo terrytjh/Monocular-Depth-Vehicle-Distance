@@ -13,3 +13,5 @@ are here so the hashes are on record. The scorers refuse any prediction whose ha
 | `blind_v3_seal.json` | third version, comma2k19 Chunk_2 194 blind segments (`docs/DEPTH_DASH_V3_PREREG.md`) | 2026-10-01 14:59:43 | 969 |
 | `blind_v4_tw_seal.json` | fourth version, 18 Taiwanese web clips, ego speed only (`docs/DEPTH_DASH_V4_PREREG.md` 2.2) | 2026-10-02 02:06:14 | 86 |
 | `blind_v4_seal.json` | fourth version, comma2k19 Chunk_4 205 segments (`docs/DEPTH_DASH_V4_PREREG.md` 2.1) | 2026-10-02 06:37:54 | 1155 |
+| `blind_v5_seal.json` | fifth version, comma2k19 Chunk_5 211 segments (`docs/DEPTH_DASH_V5_PREREG.md`) | 2026-10-02 17:10:01 | 1381 |
+| `blind_v6_seal.json` | sixth version, the same 211 segments, sealed after the fifth and before any truth (`docs/DEPTH_DASH_V6_PREREG.md`) | 2026-10-02 17:11:36 | 164 |
