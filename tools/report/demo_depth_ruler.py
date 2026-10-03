@@ -52,6 +52,8 @@ OUT = ROOT / "data/output/dash_scale/demo_v2"
 WORK = OUT / "work"
 C2K = "data/input/c2k19_own/{}/frames"
 MG = "data/output/marking_geometry"
+HSR = "data/output/dash_scale/hs_rerun"
+HS_LABEL = "深度模型 × 法定虛線尺(第六版的方法)"
 
 # The clips this demo may show: development clips whose answers are already open. Nothing else is read.
 CLIPS = {
@@ -96,18 +98,24 @@ CLIPS = {
         cache="data/output/dash_scale/cache/av2_c865c156",
         mc_run=f"{WORK.relative_to(ROOT)}/methodC/run_av2_c865c156.json",
         mc_targets=f"{WORK.relative_to(ROOT)}/methodC/targets_av2_c865c156.csv"),
-    "hs002": dict(
-        kind="hs", case="002", title="海盛 002",
-        dash="data/output/dash_scale/dev/v2/da3_metric_hs1230car_002.json",
-        cars=f"{WORK.relative_to(ROOT)}/hs002_cars.json",
-        cache="data/output/dash_scale/cache/hs_002_dev",
+    "hs002": dict(                       # 10/3 rerun, this repository's programs only (data/output/dash_scale/hs_rerun)
+        kind="hs", case="002", title="海盛 002", ground=True, label=HS_LABEL,
+        dash=f"{HSR}/hs1230car_002_dash.json",
+        cars=f"{HSR}/hs1230car_002_cars_v6.json",
+        cache="data/output/dash_scale/cache/hs_rerun/hs1230car_002",
         mc_run=f"{WORK.relative_to(ROOT)}/methodC/run_hs002.json",
         mc_targets=f"{WORK.relative_to(ROOT)}/methodC/targets_hs002.csv"),
+    "hs002_v3": dict(                    # the same rerun read with the third version's ruler (the sixth refuses 002)
+        kind="hs", case="002", title="海盛 002", label="深度模型 × 法定虛線尺(第三版的方法)",
+        note="第六版在這段整段拒發:標線幾何法量到的尺度是深度虛線尺的 2.5 倍,兩把尺對不上,所以這裡用第三版(只用深度虛線尺)",
+        dash=f"{HSR}/hs1230car_002_dash.json",
+        cars=f"{HSR}/hs1230car_002_cars_v3.json",
+        cache="data/output/dash_scale/cache/hs_rerun/hs1230car_002"),
     "hs006": dict(
-        kind="hs", case="006", title="海盛 006",
-        dash="data/output/dash_scale/dev/v2/da3_metric_hs1230car_006.json",
-        cars=f"{WORK.relative_to(ROOT)}/hs006_cars.json",
-        cache="data/output/dash_scale/cache/hs_006_dev",
+        kind="hs", case="006", title="海盛 006", ground=True, label=HS_LABEL,
+        dash=f"{HSR}/hs1230car_006_dash.json",
+        cars=f"{HSR}/hs1230car_006_cars_v6.json",
+        cache="data/output/dash_scale/cache/hs_rerun/hs1230car_006",
         mc_run=f"{MG}/run_hs006_final.json", mc_targets=f"{MG}/targets_hs006_final.csv"),
 }
 BLIND_AV2 = ("0b86f508", "42f92807", "544a8102", "e1d68dde")        # sealed logs: never opened here
@@ -120,12 +128,20 @@ CARS_SFX = "_cars.json"
 HEADER_BLIND = "深度模型 × 法定虛線尺(第二版,已登錄)"
 TRUTH_NOTE = "距離已加固定偏移 2.37 m"
 GROUND_RULER = False
+EXTRA_SEALS = []                            # --seal-extra: more seals to check prediction files against
+PICK_NOTE = "依誤差排名挑出,不是挑畫面好看的"     # --pick-note: how the segment was picked (last header line)
+FAR_TXT = "範圍外"                          # set per clip from the ruler's reach, e.g. "30 m 外"
+COMPACT = False                             # --compact: development clips, header without the ruler line
+SHOW_OSD = False                            # --show-osd: keep the burned-in overlay (GPS speed) visible, after the seal
+HIDE_FAR = False                            # --hide-far: cars beyond the ruler's reach are not drawn at all; otherwise
+                                            # they get a white box and white text (not accurate; distance only, no speed)
 INSET = True                                # --no-inset: same layout, the depth inset left out (close-up crops)
 BLIND_OUT = ROOT / BLIND / "demo"
 
 # colours (hex; rgb for text, bgr for OpenCV)
 C_EGO, C_OTHER, C_FAR, C_LINE = "#E8710A", "#1A73E8", "#80868B", "#34A853"
 C_TRUTH, C_HORIZON, C_WHITE, C_SOFT = "#FBBC04", "#FBBC04", "#FFFFFF", "#DADCE0"
+C_OWN = "#12B5CB"                           # sixth version: a far car measured with its own ruler
 
 
 def rgb(hx):
@@ -258,9 +274,9 @@ def draw_line(img, line, y_top, y_bot, hx, th):
     cv2.polylines(img, [pts], False, bgr(hx), th, cv2.LINE_AA)
 
 
-def depth_inset(depth, k, overlay_boxes, full_hw, size_wh):
-    """depth x k as a colour image (red near, blue far, 3-60 m), overlay areas blanked."""
-    dm = depth.astype(np.float32) * k
+def depth_inset(depth, k, overlay_boxes, full_hw, size_wh, b=0.0):
+    """depth x k (+ b, the ground ruler) as a colour image (red near, blue far, 3-60 m), overlay areas blanked."""
+    dm = depth.astype(np.float32) * k + b
     dh, dw = dm.shape
     h, w = full_hw
     for bx0, by0, bx1, by1 in overlay_boxes:
@@ -371,11 +387,21 @@ def blind_clip(tag, label, seal):
 def check_blind(clip, keys):
     """Before any truth of a blind segment is read: every prediction file used (clip[k] for k in keys) must be in
     the seal with the same sha256, and the seal must list the segment's truth as absent when it was made."""
-    import depth_dash_multicar as M
+    import hashlib
     seal_p = Path(clip["seal"])
     seal_p = seal_p if seal_p.is_absolute() else ROOT / seal_p
-    M.check_sealed(seal_p, [str(ROOT / clip[k]) for k in keys])
     seal = json.loads(seal_p.read_text())
+    files = dict(seal.get("files", {}))
+    for extra in EXTRA_SEALS:                    # e.g. the sixth version's own seal, made later but before any truth
+        ex = json.loads((Path(extra) if Path(extra).is_absolute() else ROOT / extra).read_text())
+        if f"data/output/c2k19_truth/{clip['tag']}" not in ex.get("absent_at_seal", []):
+            raise SystemExit(f"{extra}: does not list {clip['tag']}'s truth as absent at sealing time -- refusing")
+        files.update(ex.get("files", {}))
+    for k in keys:
+        f = ROOT / clip[k]
+        if files.get(f.name) != hashlib.sha256(f.read_bytes()).hexdigest():
+            raise SystemExit(f"{f.name}: not in the seal(s), or changed since -- refusing")
+    print(f"sealed predictions verified ({len(keys)} files, sealed {seal.get('sealed_utc')})")
     if f"data/output/c2k19_truth/{clip['tag']}" not in seal.get("absent_at_seal", []):
         raise SystemExit(f"{clip['tag']}: the seal does not list its truth as absent at sealing time -- refusing")
     return seal
@@ -388,8 +414,7 @@ def seal_text(clip, seal):
     route, seg = rest.rsplit("_", 1)
     utc = datetime.strptime(seal["sealed_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     tw = utc.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-    return (f"comma2k19 {dongle} {route} 第 {seg} 段 · 預測 {tw}(台灣)封存後才讀真值 · "
-            f"依誤差排名挑出,不是挑畫面好看的")
+    return f"comma2k19 {dongle} {route} 第 {seg} 段 · 預測 {tw}(台灣)封存後才讀真值 · {PICK_NOTE}"
 
 
 def draw_cars(cv, img, s, fi, now, tracks, truth_of, truth_name, placed, hdr_h):
@@ -405,11 +430,14 @@ def draw_cars(cv, img, s, fi, now, tracks, truth_of, truth_name, placed, hdr_h):
             box = o["box"]
         if box is None:
             continue
-        col = C_FAR if o["far"] else (C_EGO if o["lane"] == 0 else C_OTHER)
+        if o["far"] and HIDE_FAR:
+            continue
+        col = C_WHITE if o["far"] else (C_EGO if o["lane"] == 0 else C_OTHER)
         x0, y0, x1, y1 = map(int, map(round, box))
         cv2.rectangle(img, (x0, y0), (x1, y1), bgr(col), th, cv2.LINE_AA)
-        if o["far"]:
-            lines = [([(f"{o['dist']:.1f} m(尺的範圍外)", C_WHITE, cv.fsmall)], col, 0.85)]
+        if o["far"]:                          # beyond the reach: white on a dark label, no speed is ever given
+            how = f"{FAR_TXT},自己的尺" if o.get("far_ruler") else FAR_TXT
+            lines = [([(f"{o['dist']:.1f} m({how};不準,不給速度)", C_WHITE, cv.fsmall)], "#000000", 0.7)]
         else:
             first = [(f"{o['dist']:.1f} m", C_WHITE, cv.fb)]
             lines = [(first, col, 0.9)]
@@ -515,23 +543,29 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     res = json.loads((ROOT / clip["dash"]).read_text())
     cars_p = ROOT / clip["cars"]
-    if res.get("status") != "ok" or not cars_p.exists():
+    # the ground ruler gives distances even when the dash ruler was refused (the cars file then has k = None)
+    ground = (blind and GROUND_RULER) or bool(clip.get("ground"))
+    if not cars_p.exists() or (res.get("status") != "ok" and not ground):
         raise SystemExit(f"{name}: no dash-scale scale or no all-cars result ({res.get('reason', cars_p)})")
     cars = json.loads(cars_p.read_text())
     frames = D.list_frames(ROOT / res["frames_dir"] if not Path(res["frames_dir"]).is_absolute() else Path(res["frames_dir"]))
     n = len(frames)
     h, w = cv2.imread(str(frames[0])).shape[:2]
-    fps, step, k = float(res["fps"]), int(res["step"]), float(res["k"])
+    fps, step = float(res["fps"]), int(res["step"])
+    k = float(res["k"]) if res.get("status") == "ok" else None
     p = res["params"]
     reach = cars.get("ruler_reach_m")
-    overlay = D.static_rows(frames)[1] if clip["kind"] == "hs" else []
+    global FAR_TXT
+    FAR_TXT = f"{reach:.0f} m 外" if reach else "範圍外"
+    overlay = D.static_rows(frames)[1] if clip["kind"] == "hs" and not SHOW_OSD else []
     tr_p = Path(cars["tracks"])
     tr_p = tr_p if tr_p.is_absolute() else ROOT / tr_p
     if blind and tr_p.resolve() != (ROOT / clip["tracks"]).resolve():
         raise SystemExit(f"{cars_p.name} points at {tr_p}, not the sealed tracks file")
     tracks = json.loads(tr_p.read_text())["frames"] if tr_p.exists() else None
-    k_car = float(cars.get("k_car", k))                 # the ruler the cars were read with ("far" car ruler)
+    k_car = float(cars.get("k_car", k)) if k is not None else None    # the ruler the cars were read with ("far" car ruler)
     samples = cars["samples"]
+    has_own = any(o.get("far_ruler") for x in samples for o in x["objects"])
     sfi = [s["fi"] for s in samples]
     ego_bins = {int(round(e["t0"])): e for e in cars.get("ego", [])}
     stems = [f.stem for f in frames]
@@ -598,19 +632,26 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
         if blind:
             line1 = [(HEADER_BLIND, C_WHITE, cv.fh),
                      (f"   {clip['title']}", C_WHITE, cv.fb), (f"   t = {t:5.1f} s", C_SOFT, cv.f)]
-            line3 = [(f"尺 k = {k:.3f}", C_WHITE, cv.fb),
+            line3 = [(f"尺 k = {k:.3f}" if k is not None else "虛線尺 拒發(沒有 k)", C_WHITE, cv.fb),
                      (("   量車:路面校正 a·z + b(每 ±2.5 s 擬合)" if GROUND_RULER else f"   量車的尺 k_car = {k_car:.3f}"), C_WHITE, cv.fb),
                      (f"   可信範圍 {reach:.0f} m" if reach else "   可信範圍 —", C_WHITE, cv.fb),
                      (f"   法定虛線週期 {res['cycle_m']:g} m", C_SOFT, cv.f)]
             hdr_lines = [line1, line2, line3, [(seal_text(clip, seal), C_SOFT, cv.fsmall)]]
         else:
-            src = "OSD 已塗黑" if clip["kind"] == "hs" else "開發片,答案已開過"
-            line1 = [("深度模型 × 法定虛線尺(第二版)", C_WHITE, cv.fh),
+            src = ("開發片,畫面下方疊字 = 本車 GPS(預測已封存後才顯示)" if SHOW_OSD else "開發片,OSD 已塗黑") \
+                if clip["kind"] == "hs" else "開發片,答案已開過"
+            line1 = [(clip.get("label", "深度模型 × 法定虛線尺(第二版)"), C_WHITE, cv.fh),
                      (f"   {clip['title']}({src})   t = {t:5.1f} s", C_SOFT, cv.f)]
-            line3 = [(f"尺 k = {k:.3f}", C_WHITE, cv.fb),
+            line3 = [(f"尺 k = {k:.3f}" if k is not None else "虛線尺 拒發(沒有 k)", C_WHITE, cv.fb)] \
+                + ([("   量車:路面校正 a·z + b(每 ±2.5 s 擬合)", C_WHITE, cv.fb)] if ground else []) + [
                      (f"   可信範圍 {reach:.0f} m" if reach else "   可信範圍 —", C_WHITE, cv.fb),
                      (f"   法定虛線週期 {res['cycle_m']:g} m", C_SOFT, cv.f)]
-            hdr_lines = [line1, line2, line3]
+            hdr_lines = [line1, line2] + ([] if COMPACT else [line3]) \
+                + ([[(clip["note"], C_TRUTH, cv.fsmall)]] if clip.get("note") else [])
+            if SHOW_OSD:                  # the bottom strip is the overlay (GPS speed): the legend moves up here
+                far_t = f"{FAR_TXT}的車不顯示" if HIDE_FAR else f"白框白字 = {FAR_TXT}:不準,只給距離、不給速度"
+                hdr_lines.append([(f"橘框 = 本車道的車   藍框 = 其他車道的車   {far_t}   綠線 = 追到的本車道線   "
+                                   "底部疊字 = 本車 GPS", C_SOFT, cv.fsmall)])
         hdr_h = header_height(cv, hdr_lines)
         status = None
         if depth is None:
@@ -635,16 +676,23 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
             placed.append((0, hdr_h, sw, hdr_h + sh))
         draw_cars(cv, img, s, fi, now, tracks, truth_of, truth_name, placed, hdr_h)
         # depth inset, top right under the header
-        if depth is not None and INSET:
-            ins = depth_inset(depth, k_ins, overlay, (h, w), (iw, ih))
+        gf = s.get("ground_fit") or {}
+        if ground and gf.get("ok"):                     # the inset in the ruler the cars were read with
+            ins_k, ins_b, ins_txt = gf["a"], gf["b"], "深度圖 × 路面校正(紅近、藍遠)"
+        else:
+            ins_k, ins_b = k_ins, 0.0
+            ins_txt = "深度圖 × k_car(紅近、藍遠)" if blind and not GROUND_RULER else "深度圖 × k(紅近、藍遠)"
+        if depth is not None and INSET and ins_k is not None:
+            ins = depth_inset(depth, ins_k, overlay, (h, w), (iw, ih), ins_b)
             img[iy:iy + ih, ix:ix + iw] = ins
             cv2.rectangle(img, (ix - 1, iy - 1), (ix + iw, iy + ih), (255, 255, 255), 1)
             cv.fill(ix, iy, ix + iw, iy + cv.line_h(cv.fsmall) + 2, "#000000", 0.55)
-            cv.runs(ix + 4, iy + 1, [("深度圖 × k_car(紅近、藍遠)" if blind and not GROUND_RULER else "深度圖 × k(紅近、藍遠)",
-                                      C_WHITE, cv.fsmall)])
+            cv.runs(ix + 4, iy + 1, [(ins_txt, C_WHITE, cv.fsmall)])
         header(cv, hdr_lines)
+        far_txt = (f"{FAR_TXT}(超出尺的可信範圍)的車不顯示" if HIDE_FAR else
+                   f"白框白字 = {FAR_TXT}(超出尺的可信範圍):不準,只給距離、不給速度" + ("(第六版用每台車自己的尺)" if has_own else ""))
         items = [(C_EGO, "本車道的車", C_WHITE), (C_OTHER, "其他車道的車", C_WHITE),
-                 (C_FAR, "尺的範圍外:只給距離", C_WHITE), (C_LINE, "追到的本車道線", C_WHITE)]
+                 (None if HIDE_FAR else C_WHITE, far_txt, C_WHITE), (C_LINE, "追到的本車道線", C_WHITE)]
         if blind:
             items.append((None, f"黃字 = 真值:雷達({TRUTH_NOTE})與定位車速", C_TRUTH))
         elif truth_name == "雷達":
@@ -653,7 +701,8 @@ def render(name, still_at=None, still_out=None, clip=None, out_dir=None):
             items.append((None, "黃字 = 光達 3D 框(真值,距離已加固定偏移 0.85 m)", C_TRUTH))
         elif clip["kind"] == "hs":
             items.append((None, "海盛片沒有他車真值", C_SOFT))
-        legend(cv, items)
+        if not SHOW_OSD:
+            legend(cv, items)
         frame = cv.finish()
         if still_at is not None:
             dst = Path(still_out or out_dir / f"depth_{name}_t{still_at:g}.png")
@@ -685,19 +734,32 @@ def main():
     ap.add_argument("--batch", default=None, help="a later blind batch folder (files directly in it, cache under cache/<name>)")
     ap.add_argument("--cars-suffix", default="_cars.json", help="e.g. _cars_v4.json (the ground ruler)")
     ap.add_argument("--version-label", default=None, help="header text, e.g. 深度模型 × 法定虛線尺(第四版,已登錄)")
+    ap.add_argument("--seal-extra", nargs="*", default=[], help="more seals (e.g. a later version sealed before any truth)")
     ap.add_argument("--no-inset", action="store_true", help="leave the depth inset out (labels keep their places)")
+    ap.add_argument("--pick-note", default=None, help="how the segment was picked (last header line of a blind video)")
+    ap.add_argument("--compact", action="store_true", help="development clips: header without the ruler line")
+    ap.add_argument("--show-osd", action="store_true",
+                    help="Haisheng clips: keep the overlay (GPS speed, time, position) visible -- only after the seal, never public")
+    ap.add_argument("--hide-far", action="store_true",
+                    help="do not draw cars beyond the ruler's reach (default: white box and white text, marked not accurate)")
     ap.add_argument("--corrected-truth", action="store_true", help="truth = radar - 0.33 m (comma2k19 range includes 2.70 m)")
     a = ap.parse_args()
-    global BLIND, BLIND_PRED_SUB, CARS_SFX, HEADER_BLIND, TRUTH_NOTE, GROUND_RULER, INSET
+    global BLIND, BLIND_PRED_SUB, CARS_SFX, HEADER_BLIND, TRUTH_NOTE, GROUND_RULER, INSET, EXTRA_SEALS, PICK_NOTE, HIDE_FAR, SHOW_OSD, COMPACT
     if a.batch:
         BLIND, BLIND_PRED_SUB = a.batch.rstrip("/"), ""
         if a.seal == "data/output/dash_scale/blind_v2/seal.json":
             a.seal = f"{BLIND}/seal.json"
     CARS_SFX = a.cars_suffix
-    GROUND_RULER = CARS_SFX in ("_cars_v4.json", "_cars_v5.json")
+    GROUND_RULER = CARS_SFX in ("_cars_v4.json", "_cars_v5.json", "_cars_v6.json")
     if a.version_label:
         HEADER_BLIND = a.version_label
     INSET = not a.no_inset
+    EXTRA_SEALS = list(a.seal_extra)
+    if a.pick_note:
+        PICK_NOTE = a.pick_note
+    HIDE_FAR = a.hide_far
+    SHOW_OSD = a.show_osd
+    COMPACT = a.compact
     if a.corrected_truth:
         import depth_dash_multicar as M
         M.PARAMS["radar_processing_m"] = 2.70
@@ -711,7 +773,7 @@ def main():
         ap.error("--clip or --blind-tag is required")
     names = list(CLIPS) if a.clip == "all" else [a.clip]
     for nm in names:
-        render(nm, a.still_at, a.still_out)
+        render(nm, a.still_at, a.still_out, out_dir=a.out_dir)
 
 
 if __name__ == "__main__":
