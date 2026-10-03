@@ -56,6 +56,11 @@ def main():
     ap.add_argument("--show-osd", action="store_true")
     ap.add_argument("--osd-speed", action="store_true", help="Haisheng: keep only the GPS speed of the overlay (date, time, position blacked)")
     ap.add_argument("--truth", action="store_true", help="also show the truth in yellow")
+    ap.add_argument("--web", action="store_true", help="the Taiwan web clips (blind_v4_tw): no truth; sealed files checked")
+    ap.add_argument("--start", type=float, default=None, help="render from this second")
+    ap.add_argument("--duration", type=float, default=None, help="render this many seconds")
+    ap.add_argument("--best-window", type=float, default=None,
+                    help="render only the window of this many seconds with the most speed readings")
     ap.add_argument("--short", default=None)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--still-at", type=float, default=None)
@@ -70,7 +75,16 @@ def main():
         if a.corrected_truth:
             M.PARAMS["radar_processing_m"] = 2.70
         clip = R.blind_clip(a.blind_tag, a.short or a.blind_tag, f"{R.BLIND}/seal.json")
-        R.check_blind(clip, ("dash", "cars", "tracks"))
+        if a.web:                               # no truth exists for these clips; the prediction files must be the sealed ones
+            import hashlib
+            sealed = json.loads((ROOT / clip["seal"]).read_text())["files"]
+            for key in ("dash", "cars"):
+                f = ROOT / clip[key]
+                if sealed.get(f.name) != hashlib.sha256(f.read_bytes()).hexdigest():
+                    raise SystemExit(f"{f.name}: not the sealed file -- refusing")
+            clip["kind"] = "web"
+        else:
+            R.check_blind(clip, ("dash", "cars", "tracks"))
         name, tag_txt = a.short or a.blind_tag, f"{VERSION}|盲測(預測封存後才讀真值)"
     else:
         clip = R.CLIPS[a.clip]
@@ -105,6 +119,16 @@ def main():
     pw, ph = w // 2, h // 2                                      # each panel at half size: one 960 x 1080 picture
     writer = None if a.still_at is not None else R.Writer(out_dir / f"clean_{name}.mp4", pw, 2 * ph, fps)
     todo = range(n) if a.still_at is None else [int(round(a.still_at * fps))]
+    if a.start is not None and a.still_at is None:
+        f0 = int(round(a.start * fps))
+        todo = range(f0, min(n, f0 + int(round((a.duration or 10) * fps))))
+    elif a.best_window and a.still_at is None:     # the window with the most cars carrying a speed (predictions only)
+        cnt = [sum(1 for o in x["objects"] if not o["far"] and o.get("abs_kmh") is not None) for x in samples]
+        span = max(1, int(round(a.best_window * fps)))
+        best = max(range(0, max(1, n - span), max(1, int(fps))),
+                   key=lambda f0: sum(c for x, c in zip(samples, cnt) if f0 <= x["fi"] < f0 + span))
+        todo = range(best, min(n, best + span))
+        print(f"window {best / fps:.1f}-{(best + span) / fps:.1f} s")
     cur, dpanel = None, None
     for fi in todo:
         j = max(0, bisect.bisect_right(sfi, fi) - 1)

@@ -111,6 +111,11 @@ CLIPS = {
         dash=f"{HSR}/hs1230car_002_dash.json",
         cars=f"{HSR}/hs1230car_002_cars_v3.json",
         cache="data/output/dash_scale/cache/hs_rerun/hs1230car_002"),
+    "hs005": dict(                       # held-out daytime freeway (second version addendum 1), rerun 10/3 like 002 / 006
+        kind="hs", case="005", title="海盛 005", ground=True, label=HS_LABEL,
+        dash=f"{HSR}/hs1230car_005_dash.json",
+        cars=f"{HSR}/hs1230car_005_cars_v6.json",
+        cache="data/output/dash_scale/cache/hs_rerun/hs1230car_005"),
     "hs006": dict(
         kind="hs", case="006", title="海盛 006", ground=True, label=HS_LABEL,
         dash=f"{HSR}/hs1230car_006_dash.json",
