@@ -74,6 +74,7 @@ PARAMS = dict(
     hood_width=0.8,          # fraction of the frame height and whose width exceeds hood_width of the frame width is the own
                              # car's bonnet (comma2k19's bonnet reflects the scene, so static_rows does not find it); off by
                              # default, which reproduces every earlier output
+    k_camera_reach=30.0,     # 2026-10-13 (development), measure --k-camera: reach of the camera's k (as the ground ruler's d_max)
     dedup_iou=0.7,           # 2026-09-30 evening: two boxes of one frame overlapping by IoU > this are one car (YOLO's NMS
                              # is per class, so a pickup comes out as both car and truck with two track ids); the more
                              # confident box is kept. 0 = off (outputs before this addition)
@@ -470,12 +471,17 @@ def cmd_measure(a):
     ground = mode == "ground"
     if ground and not a.marking:
         raise SystemExit("--car-ruler ground needs --marking (the marking run's *_run.json)")
+    kcam = getattr(a, "k_camera", None)          # 2026-10-13 (development): the camera's k learnt on other drives
+    if kcam is not None and mode != "single":
+        raise SystemExit("--k-camera goes with --car-ruler single")
     ego_refused = None                             # ground ruler: the cars do not use k, so a refused k only removes the ego speed
+    if kcam is not None:
+        ego_refused = "k-camera mode: distances and relative speeds only"
     if res.get("status") != "ok":
-        if not ground:
+        if not ground and kcam is None:
             print(f"{a.dash}: the dash-scale result was refused ({res.get('reason', '')[:80]}); no distances")
             return
-        ego_refused = f"dash-scale result refused: {res.get('reason', '')[:160]}"
+        ego_refused = ego_refused or f"dash-scale result refused: {res.get('reason', '')[:160]}"
     tr = json.loads(Path(a.tracks).read_text())["frames"]
     frames = D.list_frames(Path(a.frames))
     h, w = cv2.imread(str(frames[0])).shape[:2]
@@ -485,12 +491,12 @@ def cmd_measure(a):
     g = a.k_guard if a.k_guard is not None else PARAMS["k_guard"]
     if g and k is not None and not (1 / g <= k <= g):
         why = f"k {k:.3f} is off the depth model's own metres by more than x{g} (half or double legal cycle?)"
-        if not ground:
+        if not ground and kcam is None:
             Path(a.out).parent.mkdir(parents=True, exist_ok=True)
             Path(a.out).write_text(json.dumps(dict(status="refused", reason=why, k=k, k_guard=g, dash=str(a.dash))))
             print(f"{a.out}: refused -- {why}")
             return
-        ego_refused = why
+        ego_refused = ego_refused or why
     if ground:
         import marking_geometry as MG
         mk = json.loads(Path(a.marking).read_text())
@@ -501,6 +507,8 @@ def cmd_measure(a):
         rf = np.array([r_["frame"] for r_ in rul])
         reach = GROUND_RULER["d_max"]
         pend, rows = [], []                        # per sample: (object, z) waiting for the window fit; the road rows
+    elif kcam is not None:
+        k_car, reach = float(kcam), PARAMS["k_camera_reach"]
     else:
         r_car, n_far = car_ruler_factor([(x["z_near"] * k, x["period"]) for x in res["periods"]
                                          if x["side"] in res.get("lines_used", [])], res["cycle_m"], mode)
@@ -558,7 +566,7 @@ def cmd_measure(a):
                 if np.isfinite(d) and d > 0:
                     s["objects"].append(dict(o, dist=float(d), far=bool(d > reach)))
     hw = int(a.half_win) if getattr(a, "half_win", None) else PARAMS["half_win"]
-    scale_rel = ruler_scale_sigma(res)
+    scale_rel = float(a.k_camera_sigma) if kcam is not None else ruler_scale_sigma(res)
     ego_mode = getattr(a, "ego_ruler", None) or "single"
     if ego_mode == "local" and not ego_refused:
         res = dict(res, speeds=local_ruler_speeds(res))
@@ -579,6 +587,8 @@ def cmd_measure(a):
             out.update(ego_refused=ego_refused)
     elif mode != "single":
         out.update(car_ruler=mode, k_car=k_car, car_ruler_far_cycles=n_far)
+    if kcam is not None:
+        out.update(k_camera=float(kcam), k_camera_sigma=float(a.k_camera_sigma), k_camera_reach=reach, ego_refused=ego_refused)
     if ego_mode != "single":
         out.update(ego_ruler=ego_mode, ego_ruler_params=EGO_RULER)
     if smooth != "none":
@@ -592,7 +602,8 @@ def cmd_measure(a):
     for s in samples:
         for o in s["objects"]:
             lanes[o["lane"]] = lanes.get(o["lane"], 0) + 1
-    ruler = f"ground fit accepted on {out['ground_fits']['ok']}/{len(samples)} samples" if ground else f"k {k:.4f}"
+    ruler = (f"ground fit accepted on {out['ground_fits']['ok']}/{len(samples)} samples" if ground
+             else f"camera k {kcam:.4f}" if kcam is not None else f"k {k:.4f}")
     print(f"wrote {a.out}: {ruler}, ruler reach {reach:.1f} m, {len(samples)} samples, {n_obj} car readings, "
           f"{len(by_id)} tracks, by lane {dict(sorted(lanes.items(), key=lambda x: (x[0] is None, x[0] or 0)))}"
           + (f" (no ego speed: {ego_refused[:90]})" if ego_refused else ""))
@@ -799,7 +810,8 @@ def params_out(**extra):
     """The parameters written into an output file: PARAMS without the scoring-only radar_processing_m (added 2026-10-02,
     after the second and third versions were sealed) and the --drop-hood pair (added 2026-10-13; written as drop_hood
     when the option is on), so measurement outputs stay byte-identical to theirs."""
-    return dict({k: v for k, v in PARAMS.items() if k not in ("radar_processing_m", "hood_bottom", "hood_width")}, **extra)
+    return dict({k: v for k, v in PARAMS.items() if k not in ("radar_processing_m", "hood_bottom", "hood_width", "k_camera_reach")},
+                **extra)
 
 
 def c2k19_score(cars, tdir, return_rows=False):
@@ -1152,6 +1164,11 @@ def main():
     m.add_argument("--drop-hood", action="store_true",
                    help="2026-10-13 (development): boxes that are the own car's bonnet (PARAMS hood_bottom / hood_width) "
                         "are not measured as cars (the ground ruler's road-row mask is unchanged)")
+    m.add_argument("--k-camera", type=float, default=None,
+                   help="2026-10-13 (development), with --car-ruler single: read the cars with this k (the same camera's "
+                        "k learnt on other drives, tools/camera_k.py) instead of the segment's own, also when the "
+                        "segment's dash ruler refused; no ego speed; reach PARAMS k_camera_reach")
+    m.add_argument("--k-camera-sigma", type=float, default=0.0, help="relative uncertainty of --k-camera")
     mc = sub.add_parser("measure-c", help="method C (lane markings only) distances on the same tracks")
     for x in ("--frames", "--tracks", "--marking", "--out"):
         mc.add_argument(x, required=True)
