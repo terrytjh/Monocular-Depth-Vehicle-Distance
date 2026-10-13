@@ -10,7 +10,14 @@ the same camera it can be learnt where the dash ruler works and reused where it 
          class and day / night, with the scorer's 50 % gate and without it; and the ratio of each segment's own k and
          marking-geometry a to the camera's k.
 
+  learn-night (predictions only): the depth model reads night frames at another scale, so the day k does not carry
+         over. Per night segment of a batch: the median effective k at 20 m, (a x 20 + b) / 20 of the accepted ground fits
+         (fourth version), over the SAME camera's night segments from OTHER drives that the fifth version accepted and
+         whose effective k is within 1.3x of the day camera k (two rulers locked to the half period together pass the
+         fifth version's own check; this catches them).
+
   python3 tools/camera_k.py learn --batch DIR --out k_camera.json
+  python3 tools/camera_k.py learn-night --batch DIR --current DIR --day k_camera.json --out k_night.json
   python3 tools/camera_k.py score --batch DIR --kc DIR --current DIR --k-camera k_camera.json --out X.json
 """
 import argparse
@@ -57,6 +64,35 @@ def learn(a):
     ks = [v["k_camera"] for v in out.values()]
     print(f"{len(out)}/{len(tags)} segments got a camera k: median {np.median(ks):.3f} (range {min(ks):.3f}-{max(ks):.3f}), "
           f"sigma median {np.median([v['sigma'] for v in out.values()]):.3f}")
+
+
+def effective_k(cars4, at_m=20.0, min_fits=20):
+    ke = [(s["ground_fit"]["a"] * at_m + s["ground_fit"]["b"]) / at_m for s in cars4.get("samples", [])
+          if (s.get("ground_fit") or {}).get("ok")]
+    return float(np.median(ke)) if len(ke) >= min_fits else None
+
+
+def learn_night(a):
+    B, CUR = Path(a.batch), Path(a.current)
+    night = [l.strip() for l in open(B / "tags_night.txt") if l.strip()]
+    day = json.loads(Path(a.day).read_text())["segments"]
+    good = []
+    for t in night:
+        p5, p4 = CUR / f"{t}_cars_v5.json", CUR / f"{t}_cars_v4.json"
+        if not (p5.exists() and p4.exists() and t in day) or json.loads(p5.read_text()).get("status") == "refused":
+            continue
+        k = effective_k(json.loads(p4.read_text()))
+        if k and 1 / 1.3 <= k / day[t]["k_camera"] <= 1.3:
+            good.append((camera(t), drive(t), k))
+    out = {}
+    for t in night:
+        ks = np.array([k for c, dr, k in good if c == camera(t) and dr != drive(t)])
+        if len(ks) >= a.min_n:
+            out[t] = dict(k_camera=float(np.median(ks)), sigma=float(ks.std() / ks.mean()), n=int(len(ks)))
+    Path(a.out).write_text(json.dumps(dict(rule=__doc__.split("learn-night")[1].split("python3")[0].strip(), segments=out), indent=1))
+    ks = [v["k_camera"] for v in out.values()]
+    print(f"{len(out)}/{len(night)} night segments got a night k from {len(good)} accepted night segments"
+          + (f": median {np.median(ks):.3f} ({min(ks):.3f}-{max(ks):.3f})" if ks else ""))
 
 
 def score(a):
@@ -118,11 +154,15 @@ def main():
     le.add_argument("--batch", required=True)
     le.add_argument("--min-n", type=int, default=5)
     le.add_argument("--out", required=True)
+    ln = sub.add_parser("learn-night")
+    for x in ("--batch", "--current", "--day", "--out"):
+        ln.add_argument(x, required=True)
+    ln.add_argument("--min-n", type=int, default=5)
     sc = sub.add_parser("score")
     for x in ("--batch", "--kc", "--current", "--k-camera", "--out"):
         sc.add_argument(x, required=True)
     a = ap.parse_args()
-    dict(learn=learn, score=score)[a.cmd](a)
+    dict(learn=learn, score=score, **{"learn-night": learn_night})[a.cmd](a)
 
 
 if __name__ == "__main__":
