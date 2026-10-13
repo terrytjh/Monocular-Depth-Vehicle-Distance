@@ -36,7 +36,13 @@ def frame_width(tracks):
     return cv2.imread(str(first[0])).shape[1]
 
 
-def combine(cars, width, p=V6):
+def combine(cars, width, p=V6, apply_from=None, class_min_tracks=None):
+    """Development options (2026-10-13; None = the sixth version):
+    apply_from        also readings inside the reach whose distance is over apply_from metres get the geometric mean
+                      (they read short too from about 25 m on);
+    class_min_tracks  a car without its own ruler takes the median K of the cars of its class (car / bus / truck) in the
+                      same segment that have one, when at least class_min_tracks of them do (cars of a class are about
+                      equally wide)."""
     out = copy.deepcopy(cars)
     out["v6"] = dict(params=dict(p), frame_width=width,
                      method="sixth version: far readings = geometric mean of the depth distance and the car's own ruler")
@@ -50,21 +56,38 @@ def combine(cars, width, p=V6):
             if d is not None and not o.get("far") and p["near_m"][0] <= d <= p["near_m"][1] and usable(o["box"]):
                 near[o["id"]].append(d * (o["box"][2] - o["box"][0]))
     K = {i: float(np.median(v)) for i, v in near.items() if len(v) >= p["min_near"]}
-    n_far = n_ext = 0
+    Kc = {}
+    if class_min_tracks:
+        cls = {o["id"]: o.get("cls") for s in out["samples"] for o in s["objects"]}
+        byc = defaultdict(list)
+        for i, k in K.items():
+            byc[cls.get(i)].append(k)
+        Kc = {c: float(np.median(v)) for c, v in byc.items() if c is not None and len(v) >= class_min_tracks}
+    n_far = n_ext = n_cls = 0
     for s in out["samples"]:
         for o in s["objects"]:
-            if not o.get("far") or o.get("dist") is None:
+            if o.get("dist") is None or not (o.get("far") or (apply_from is not None and o["dist"] > apply_from)):
                 continue
             n_far += 1
-            if o["id"] not in K or not usable(o["box"]):
+            if not usable(o["box"]) or (o["id"] not in K and o.get("cls") not in Kc):
                 continue
             w = o["box"][2] - o["box"][0]
-            size = K[o["id"]] / w
-            o["dist_v5"], o["dist_own_car"] = o["dist"], size
+            if o["id"] in K:
+                size = K[o["id"]] / w
+                o["dist_v5"], o["dist_own_car"] = o["dist"], size
+                o["far_ruler"] = "own-car"
+                n_ext += 1
+            else:
+                size = Kc[o["cls"]] / w
+                o["dist_v5"], o["dist_class"] = o["dist"], size
+                o["far_ruler"] = "same-class"
+                n_cls += 1
             o["dist"] = float(np.sqrt(o["dist"] * size))
-            o["far_ruler"] = "own-car"
-            n_ext += 1
     out["v6"].update(cars_with_ruler=len(K), far_readings=n_far, far_readings_with_ruler=n_ext)
+    if apply_from is not None:
+        out["v6"]["apply_from_m"] = apply_from
+    if class_min_tracks:
+        out["v6"].update(class_min_tracks=class_min_tracks, class_K=Kc, readings_with_class_ruler=n_cls)
     return out
 
 
@@ -73,9 +96,13 @@ def main():
     ap.add_argument("--cars", required=True, help="fifth-version *_cars_v5.json (or a fourth-version *_cars_v4.json)")
     ap.add_argument("--tracks", required=True, help="*_tracks.json of the same segment (frame width)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--apply-from", type=float, default=None, help="development: also correct readings beyond this distance")
+    ap.add_argument("--near-max", type=float, default=None, help="development: upper end of the near readings (default 25 m)")
+    ap.add_argument("--class-min-tracks", type=int, default=None, help="development: same-class ruler from this many cars")
     a = ap.parse_args()
     cars = json.loads(Path(a.cars).read_text())
-    res = combine(cars, frame_width(json.loads(Path(a.tracks).read_text())))
+    p = dict(V6, near_m=(V6["near_m"][0], a.near_max)) if a.near_max is not None else V6
+    res = combine(cars, frame_width(json.loads(Path(a.tracks).read_text())), p, a.apply_from, a.class_min_tracks)
     Path(a.out).write_text(json.dumps(res, indent=1))
     v = res["v6"]
     print(f"wrote {a.out}: {res.get('status', 'ok')} cars with an own ruler {v.get('cars_with_ruler')}, "
