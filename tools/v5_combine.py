@@ -32,7 +32,37 @@ def median_a(cars):
     return float(np.median(a)) if a else None
 
 
-def combine(dep, mrk, p=V5):
+def average_rel(out, mrk, p=V5):
+    """--rel-average (2026-10-13, development on opened data; off = the fifth version): where marking geometry has a
+    relative speed for the same car at the same sample, report the mean of the two methods (their errors correlate only
+    0.17-0.30 on the main road groups of Chunk_4 / Chunk_5 / Chunk_2). sigma = 0.5 x hypot of the two; the 95 % range
+    is scaled with sigma; the absolute speed moves with the relative speed, its range as in the combined windows."""
+    mr = {}
+    for s in mrk.get("samples", []):
+        for o in s.get("objects", []):
+            if o.get("rel_kmh") is not None:
+                mr[(s["fi"], o["id"])] = o
+    n = 0
+    for s in out.get("samples", []):
+        for o in s.get("objects", []):
+            m = mr.get((s["fi"], o["id"]))
+            if o.get("rel_kmh") is None or m is None:
+                continue
+            new = 0.5 * (o["rel_kmh"] + m["rel_kmh"])
+            sig = 0.5 * float(np.hypot(o["rel_sigma_kmh"], m["rel_sigma_kmh"]))
+            if o.get("rel_sigma_kmh"):
+                o["rel_ci95_kmh"] = o["rel_ci95_kmh"] * sig / o["rel_sigma_kmh"]
+            o["rel_kmh_depth"], o["rel_kmh_marking"] = o["rel_kmh"], m["rel_kmh"]
+            if o.get("abs_kmh") is not None:
+                o["abs_kmh"] += new - o["rel_kmh"]
+                if o.get("ego_win_sigma_kmh") is not None:
+                    o["abs_ci95_kmh"] = 1.96 * float(np.hypot(p["m_rel"] * sig, p["m_ego"] * o["ego_win_sigma_kmh"]))
+            o["rel_kmh"], o["rel_sigma_kmh"] = new, sig
+            n += 1
+    return n
+
+
+def combine(dep, mrk, p=V5, rel_average=False):
     out = copy.deepcopy(dep)
     out["v5"] = dict(params=dict(p), method="fifth version: scale check + mean ego of depth and marking geometry")
     if dep.get("status") == "refused":
@@ -84,6 +114,8 @@ def combine(dep, mrk, p=V5):
             o["abs_ci95_kmh"] = 1.96 * float(np.hypot(p["m_rel"] * o["rel_sigma_kmh"], p["m_ego"] * es))
             n_abs += 1
     out["v5"].update(ego_bins_combined=used, abs_windows_combined=n_abs)
+    if rel_average and m_ok:
+        out["v5"].update(rel_average=True, rel_readings_averaged=average_rel(out, mrk, p))
     return out
 
 
@@ -92,10 +124,11 @@ def main():
     ap.add_argument("--depth", required=True)
     ap.add_argument("--marking", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--rel-average", action="store_true", help="development: relative speed = mean of the two methods")
     a = ap.parse_args()
     dep = json.loads(Path(a.depth).read_text())
     mrk = json.loads(Path(a.marking).read_text()) if Path(a.marking).exists() else None
-    res = combine(dep, mrk)
+    res = combine(dep, mrk, rel_average=a.rel_average)
     Path(a.out).write_text(json.dumps(res, indent=1))
     v = res.get("v5", {})
     print(f"wrote {a.out}: {res.get('status', 'ok')} {res.get('reason', '')} ego bins combined {v.get('ego_bins_combined')}, "
