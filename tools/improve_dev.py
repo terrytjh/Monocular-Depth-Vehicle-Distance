@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Compare a changed method with the current one on OPENED comma2k19 Chunk_4 (sealed and scored on 2026-10-02).
-A development comparison, not a blind test: every segment is checked to be in blind_v4/seal.json with its truth made.
+"""Compare a changed method with the current one on an OPENED comma2k19 batch (default Chunk_4, sealed and scored on
+2026-10-02; --batch data/output/dash_scale/blind_v3 for Chunk_2). A development comparison, not a blind test: every
+segment is checked to be in the batch's seal.json with its truth made.
 
-  python3 tools/improve_dev.py --base DIR --new DIR [--groups main,local_day,night] --out X.json
+  python3 tools/improve_dev.py --base DIR --new DIR [--batch DIR] [--groups main,local_day,night] --out X.json
 
 Per road group: segments with an output, distances inside the reach (own lane / next lanes) with the scorer's 50 %
 sanity gate (as the registered scores) and without it (every reading a user would see), the readings beyond the reach,
@@ -23,11 +24,11 @@ SRC = ROOT / "data/output/dash_scale/blind_v4"
 TRUTH = ROOT / "data/output/c2k19_truth"
 
 
-def opened_check(tags):
-    seal = json.loads((SRC / "seal.json").read_text())["files"]
+def opened_check(tags, src):
+    seal = json.loads((src / "seal.json").read_text())["files"]
     for t in tags:
         if f"{t}_dash.json" not in seal or not (TRUTH / t / "radar.csv").exists():
-            raise SystemExit(f"{t}: not a sealed-and-opened Chunk_4 segment -- refusing to score")
+            raise SystemExit(f"{t}: not a sealed-and-opened segment of {src.name} -- refusing to score")
 
 
 def summ(e):
@@ -90,14 +91,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", required=True)
     ap.add_argument("--new", required=True)
+    ap.add_argument("--batch", default=str(SRC), help="the opened batch: its seal.json and tags_*.txt")
     ap.add_argument("--groups", default="main,local_day,night")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     M.PARAMS["radar_processing_m"] = 2.70                       # corrected truth
     res = {}
     for g in a.groups.split(","):
-        tags = [l.strip() for l in open(SRC / f"tags_{g}.txt") if l.strip() and not l.startswith("#")]
-        opened_check(tags)
+        src = Path(a.batch)
+        tags = [l.strip() for l in open(src / f"tags_{g}.txt") if l.strip() and not l.startswith("#")]
+        opened_check(tags, src)
         M.C2K19_DEV.update(tags)                                  # opened_check stands in for the seal check of new files
         res[g] = {}
         for lab, d in (("base", Path(a.base)), ("new", Path(a.new))):

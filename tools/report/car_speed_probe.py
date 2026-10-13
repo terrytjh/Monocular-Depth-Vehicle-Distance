@@ -28,6 +28,7 @@ relative speed's (the given ego speed is taken as exact). Our distances and rela
 only the ego speed may come from the manual frame-count sheet, and only for a sealed clip (--no-sheet: never).
 """
 import argparse
+import functools
 import json
 import sys
 from pathlib import Path
@@ -48,6 +49,7 @@ OUT = ROOT / "data/output/dash_scale/car_speed_probe"
 SEALS = ("data/output/dash_scale/hs_rerun/seal.json", "data/output/dash_scale/hs_rerun/seal_005.json")
 
 
+@functools.lru_cache(maxsize=None)
 def sealed(path):
     """True when this prediction file is in one of the Haisheng rerun seals with the same sha256."""
     import hashlib
@@ -59,6 +61,11 @@ def sealed(path):
     return False
 
 
+@functools.lru_cache(maxsize=None)
+def sheet_segments(case):
+    return tuple(R.hs_manual_segments(case))
+
+
 def ego_at(a, clip, cars, fi, fps):
     """(ego km/h used for the cars, its source, our own ego km/h at that second or None)."""
     t = fi / fps
@@ -67,7 +74,7 @@ def ego_at(a, clip, cars, fi, fps):
     if a.ego_kmh is not None:
         return a.ego_kmh, "使用者輸入", own_kmh
     if not a.no_sheet and clip.get("kind") == "hs" and sealed(ROOT / clip["cars"]):
-        seg = R.hs_segment_at(R.hs_manual_segments(clip["case"]), fi)
+        seg = R.hs_segment_at(sheet_segments(clip["case"]), fi)
         if seg:
             return seg["speed_kmh"], f"人工畫格法 第 {seg['seg']} 段(30 m 平均)", own_kmh
     if own_kmh is not None:
@@ -165,6 +172,100 @@ def car_answer(samples, j, o, cars, ego):
     return r
 
 
+@functools.lru_cache(maxsize=1)
+def _overlay(frames_dir):
+    return D.static_rows(D.list_frames(Path(frames_dir)))[1]
+
+
+def overlay_boxes(frames, a):
+    return None if a.show_osd else _overlay(str(frames[0].parent))
+
+
+def short_source(src):
+    return "人工畫格法 30 m 平均" if src.startswith("人工畫格法") else src
+
+
+def draw(raw, overlay, clip, fi, fps, ego, ego_src, own_kmh, answers, a, box=None, status=None):
+    """The picture: OSD blacked out, a two-line header (ego speeds; what is not accurate), the answered cars."""
+    img = raw.copy() if overlay is None else D.black_out(raw.copy(), overlay)
+    h, w = img.shape[:2]
+    fs = R.font_px(h, w)
+    cv = R.Canvas(img, fs)
+    th = max(2, round(fs / 8))
+    l1 = [(f"本車 {ego:.0f} km/h({short_source(ego_src)})" if ego is not None else f"本車速度:{ego_src}", R.C_WHITE, cv.fb)]
+    if own_kmh is not None and not ego_src.startswith("本方法"):
+        l1.append((f"   本方法量的本車 {own_kmh:.0f} km/h", R.C_SOFT, cv.fb))
+    l1.append((f"   {clip['title']}  t = {fi / fps:.1f} s", R.C_SOFT, cv.f))
+    hdr = [l1]
+    hidden = [c for c in answers if not c["accurate"] and (a.hide_far or "rel_kmh" not in c)]
+    if status:
+        hdr.append([(f"選取的車:{status}", R.C_TRUTH, cv.fb)])
+    elif box is not None and hidden:
+        hdr.append([(f"選取的車:不準確({hidden[0]['reason']})", R.C_TRUTH, cv.fb)])
+    hdr_h = R.header_height(cv, hdr)
+    placed = []
+    for c in sorted(answers, key=lambda c: c["dist_m"]):
+        if c in hidden:
+            continue
+        good = c["accurate"]
+        col = (R.C_EGO if c.get("lane") == 0 else R.C_OTHER) if good else R.C_WHITE
+        x0, y0, x1, y1 = map(int, map(round, c["box"]))
+        cv2.rectangle(img, (x0, y0), (x1, y1), R.bgr(col), th, cv2.LINE_AA)
+        bg, al = (col, 0.9) if good else ("#000000", 0.7)
+        spd = (f"{c['car_kmh']:.0f}±{c['car_ci95_kmh']:.0f} km/h" if "car_kmh" in c
+               else f"相對 {R.sgn(c['rel_kmh'])}±{c['rel_ci95_kmh']:.0f} km/h")
+        lines = [([(f"{c['dist_m']:.1f} m" + ("" if good else "(不準)"), R.C_WHITE, cv.fb)], bg, al),
+                 ([(spd, R.C_WHITE, cv.f)], bg, al)]
+        pad = max(3, fs // 4)
+        bw, bh = cv.block(lines, pad)
+        r = R.place(bw, bh, (x0, y0, x1, y1), placed, hdr_h, h, w, must=box is not None)
+        if r is not None:
+            placed.append(r)
+            R.leader(img, r, (x0, y0, x1, y1), col)
+            cv.draw_block(r[0], r[1], lines, pad)
+    R.header(cv, hdr)
+    return cv.finish()
+
+
+def video(a, clip, res, cars, tracks, frames, fps):
+    """--until: every frame from --t to --until, one car (--track, or the tracked car under --box at --t) or every car;
+    its box follows the tracker frame by frame, its numbers are the nearest sample's (every 0.2 s)."""
+    samples = cars["samples"]
+    f0, f1 = int(round(a.t * fps)), min(len(frames) - 1, int(round(a.until * fps)))
+    tid = a.track
+    if tid is None and a.box:
+        b0 = [b for b in tracks.get(frames[f0].stem, []) if b[6] >= 0]
+        best = max(b0, key=lambda b: iou(b[:4], a.box), default=None)
+        tid = best[6] if best is not None and iou(best[:4], a.box) >= 0.3 else None
+        if tid is None:
+            raise SystemExit("the box at --t matches no tracked car")
+    h, w = cv2.imread(str(frames[f0])).shape[:2]
+    sc = min(1.0, 1280 / w)
+    od = Path(a.out)
+    name = f"probe_{a.clip}_t{a.t:.1f}-{a.until:.1f}" + (f"_car{tid}" if tid is not None else "_all") + ("_hidefar" if a.hide_far else "")
+    wr = R.Writer(od / f"{name}.mp4", int(round(w * sc)) // 2 * 2, int(round(h * sc)) // 2 * 2, fps)
+    log = []
+    for fi in range(f0, f1 + 1):
+        j = int(np.argmin([abs(s["fi"] - fi) for s in samples]))
+        near = {o["id"]: o for o in samples[j]["objects"]}
+        ego, ego_src, own_kmh = ego_at(a, clip, cars, fi, fps)
+        objs = [near[tid]] if tid is not None and tid in near else ([] if tid is not None else list(near.values()))
+        answers = [car_answer(samples, j, o, cars, ego) for o in objs]
+        live = {b[6]: b for b in tracks.get(frames[fi].stem, []) if b[6] >= 0}
+        for c in answers:                                  # the box of this very frame
+            if c["track_id"] in live:
+                c["box"] = [float(v) for v in live[c["track_id"]][:4]]
+        status = "這一刻沒有追蹤到" if tid is not None and not answers else None
+        img = draw(cv2.imread(str(frames[fi])), overlay_boxes(frames, a), clip, fi, fps, ego, ego_src, own_kmh, answers, a,
+                   box=a.box or (tid is not None or None), status=status)
+        wr.write(cv2.resize(img, (int(round(w * sc)) // 2 * 2, int(round(h * sc)) // 2 * 2), interpolation=cv2.INTER_AREA))
+        if fi == f0 or samples[j]["fi"] == fi:
+            log.append(dict(t=round(fi / fps, 2), ego_kmh=ego, ego_source=ego_src, ego_kmh_ours=own_kmh, cars=answers))
+    wr.close()
+    (od / f"{name}.json").write_text(json.dumps(dict(clip=a.clip, track=tid, hide_far=a.hide_far, samples=log), indent=1, ensure_ascii=False))
+    print("wrote", od / f"{name}.mp4")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--clip", required=True, choices=CLIPS)
@@ -176,11 +277,16 @@ def main():
     ap.add_argument("--no-sheet", action="store_true", help="never read the manual frame-count sheet")
     ap.add_argument("--list", action="store_true", help="print the tracked cars of the frame and stop")
     ap.add_argument("--show-osd", action="store_true", help="keep the overlay (GPS speed) visible in the picture")
+    ap.add_argument("--until", type=float, default=None, help="a video from --t to this time (seconds)")
+    ap.add_argument("--track", type=int, default=None, help="with --until: follow this tracked car (see --list)")
     ap.add_argument("--out", default=str(OUT))
     a = ap.parse_args()
 
     clip, res, cars, tracks, frames = load(a.clip)
     fps = float(res["fps"])
+    if a.until is not None:
+        video(a, clip, res, cars, tracks, frames, fps)
+        return
     fi = int(round(a.t * fps))
     if not 0 <= fi < len(frames):
         raise SystemExit(f"t = {a.t} s is outside the clip (0 - {len(frames) / fps:.1f} s)")
@@ -217,46 +323,8 @@ def main():
                 c.pop(k, None)
             c["status"] = f"不準確({c['reason']})"
 
-    # the picture: OSD blacked out, header with the ego speeds, every answered car with its box and label
-    img = raw.copy() if a.show_osd else D.black_out(raw.copy(), D.static_rows(frames)[1])
-    h, w = img.shape[:2]
-    fs = R.font_px(h, w)
-    cv = R.Canvas(img, fs)
-    th = max(2, round(fs / 8))
-    ego_line = (f"本車速度 {ego:.0f} km/h({ego_src})" if ego is not None else f"本車速度:{ego_src}")
-    own_line = f"   本方法量的本車速度 {own_kmh:.0f} km/h" if own_kmh is not None and ego_src != "本方法量測" else ""
-    hdr = [[("相對速度模組", R.C_WHITE, cv.fh), (f"   {clip['title']}({'疊字 = 本車 GPS' if a.show_osd else 'OSD 已塗黑'})   t = {fi / fps:.1f} s", R.C_SOFT, cv.f)],
-           [(ego_line, R.C_WHITE, cv.fb), (own_line, R.C_SOFT, cv.fb)],
-           [(f"此車速度 = 本車速度 + 相對速度;相對速度 = 這台車前後 0.8 秒距離變化的斜率({clip.get('label', '')});白框 = 不準",
-             R.C_SOFT, cv.fsmall)]]
-    if box and not picked:
-        hdr.append([(f"被選取的車:{out['status']}", R.C_TRUTH, cv.fh)])
-    hdr_h = R.header_height(cv, hdr)
-    if box:
-        ux0, uy0, ux1, uy1 = map(int, map(round, box))
-        cv2.rectangle(img, (ux0, uy0), (ux1, uy1), R.bgr(R.C_TRUTH), 1, cv2.LINE_AA)       # what the user gave
-    placed = []
-    for c in sorted(out["cars"], key=lambda c: c["dist_m"]):
-        if not c["accurate"] and (a.hide_far or "rel_kmh" not in c):
-            continue
-        good = c["accurate"]
-        col = (R.C_EGO if c.get("lane") == 0 else R.C_OTHER) if good else R.C_WHITE
-        x0, y0, x1, y1 = map(int, map(round, c["box"]))
-        cv2.rectangle(img, (x0, y0), (x1, y1), R.bgr(col), th, cv2.LINE_AA)
-        bg, al = (col, 0.9) if good else ("#000000", 0.7)
-        tag = "" if good else "(不準)"
-        spd = (f"此車 {c['car_kmh']:.0f}±{c['car_ci95_kmh']:.0f} km/h" if "car_kmh" in c
-               else f"相對 {R.sgn(c['rel_kmh'])}±{c['rel_ci95_kmh']:.0f} km/h")
-        lines = [([(f"{c['dist_m']:.1f} m{tag}", R.C_WHITE, cv.fb)], bg, al), ([(spd, R.C_WHITE, cv.f)], bg, al)]
-        pad = max(3, fs // 4)
-        bw, bh = cv.block(lines, pad)
-        r = R.place(bw, bh, (x0, y0, x1, y1), placed, hdr_h, h, w, must=bool(box))
-        if r is not None:
-            placed.append(r)
-            R.leader(img, r, (x0, y0, x1, y1), col)
-            cv.draw_block(r[0], r[1], lines, pad)
-    R.header(cv, hdr)
-    frame = cv.finish()
+    frame = draw(raw, overlay_boxes(frames, a), clip, fi, fps, ego, ego_src, own_kmh, out["cars"], a, box,
+                 None if (picked or not box) else out.get("status"))
     od = Path(a.out)
     od.mkdir(parents=True, exist_ok=True)
     stem = f"probe_{a.clip}_t{fi / fps:.1f}" + ("" if box else "_all")
