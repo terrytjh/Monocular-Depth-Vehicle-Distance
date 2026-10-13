@@ -14,7 +14,8 @@ the same camera it can be learnt where the dash ruler works and reused where it 
          over. Per night segment of a batch: the median effective k at 20 m, (a x 20 + b) / 20 of the accepted ground fits
          (fourth version), over the SAME camera's night segments from OTHER drives that the fifth version accepted and
          whose effective k is within 1.3x of the day camera k (two rulers locked to the half period together pass the
-         fifth version's own check; this catches them).
+         fifth version's own check; this catches them). --also BATCH:CURRENT:DAY adds another batch's night segments
+         (its predictions only; e.g. the same camera's earlier sealed batch), for a batch whose night is one drive.
 
   python3 tools/camera_k.py learn --batch DIR --out k_camera.json
   python3 tools/camera_k.py learn-night --batch DIR --current DIR --day k_camera.json --out k_night.json
@@ -72,18 +73,25 @@ def effective_k(cars4, at_m=20.0, min_fits=20):
     return float(np.median(ke)) if len(ke) >= min_fits else None
 
 
-def learn_night(a):
-    B, CUR = Path(a.batch), Path(a.current)
-    night = [l.strip() for l in open(B / "tags_night.txt") if l.strip()]
-    day = json.loads(Path(a.day).read_text())["segments"]
+def accepted_night(B, CUR, day):
     good = []
-    for t in night:
+    for t in [l.strip() for l in open(B / "tags_night.txt") if l.strip()]:
         p5, p4 = CUR / f"{t}_cars_v5.json", CUR / f"{t}_cars_v4.json"
         if not (p5.exists() and p4.exists() and t in day) or json.loads(p5.read_text()).get("status") == "refused":
             continue
         k = effective_k(json.loads(p4.read_text()))
         if k and 1 / 1.3 <= k / day[t]["k_camera"] <= 1.3:
             good.append((camera(t), drive(t), k))
+    return good
+
+
+def learn_night(a):
+    B, CUR = Path(a.batch), Path(a.current)
+    night = [l.strip() for l in open(B / "tags_night.txt") if l.strip()]
+    good = accepted_night(B, CUR, json.loads(Path(a.day).read_text())["segments"])
+    for x in a.also or []:
+        b, c, d = x.split(":")
+        good += accepted_night(Path(b), Path(c), json.loads(Path(d).read_text())["segments"])
     out = {}
     for t in night:
         ks = np.array([k for c, dr, k in good if c == camera(t) and dr != drive(t)])
@@ -158,6 +166,7 @@ def main():
     for x in ("--batch", "--current", "--day", "--out"):
         ln.add_argument(x, required=True)
     ln.add_argument("--min-n", type=int, default=5)
+    ln.add_argument("--also", action="append", help="BATCH:CURRENT:DAY_K_JSON of another batch (predictions only)")
     sc = sub.add_parser("score")
     for x in ("--batch", "--kc", "--current", "--k-camera", "--out"):
         sc.add_argument(x, required=True)
