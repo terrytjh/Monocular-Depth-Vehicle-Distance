@@ -32,6 +32,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     for x in ("--batch", "--current", "--kc-day", "--kc-night", "--grey", "--k-day", "--k-night", "--out"):
         ap.add_argument(x, required=True)
+    ap.add_argument("--fallback", choices=("on", "off"), default="on", help="steps 2-4 (off: the current output as it is)")
+    ap.add_argument("--far", choices=("on", "off"), default="on", help="step 5's two options (off: the sixth version)")
+    ap.add_argument("--apply-from", default=str(APPLY_FROM), help="step 5: metres, or none (only the same-class ruler)")
     a = ap.parse_args()
     B, CUR, KD, KN, O = map(Path, (a.batch, a.current, a.kc_day, a.kc_night, a.out))
     O.mkdir(parents=True, exist_ok=True)
@@ -46,7 +49,9 @@ def main():
         cur_p = CUR / f"{t}_cars_v5.json"
         cur = json.loads(cur_p.read_text()) if cur_p.exists() else {"status": "refused"}
         use, why = None, ""
-        if cur.get("status") != "refused":
+        if a.fallback == "off":
+            use, why = (cur, "current") if cur.get("status") != "refused" else (None, "")
+        elif cur.get("status") != "refused":
             ke = CK.effective_k(json.loads((CUR / f"{t}_cars_v4.json").read_text()), min_fits=1)
             k_dash = json.loads((B / f"{t}_dash.json").read_text()).get("k")
             ok = kc is None or ((ke is None or 1 / CHECK <= ke / kc["k_camera"] <= CHECK)
@@ -55,14 +60,15 @@ def main():
                 use, why = cur, "current"
             else:
                 why = "current disagrees with the camera k"
-        if use is None and kc is not None and rc != "local":
+        if use is None and a.fallback == "on" and kc is not None and rc != "local":
             p = (KD if is_day else KN) / f"{t}_cars_kc.json"
             if p.exists():
                 use, why = json.loads(p.read_text()), "camera k " + ("day" if is_day else "night")
         if use is None:
             out = dict(status="refused", reason=why or "no output and no camera k for this road class / light")
         else:
-            out = V.combine(use, WIDTH, V.V6, APPLY_FROM, CLASS_MIN)
+            af = None if a.apply_from == "none" else float(a.apply_from)
+            out = V.combine(use, WIDTH, V.V6, af, CLASS_MIN) if a.far == "on" else V.combine(use, WIDTH)
             out["next_candidate"] = dict(source=why, day=is_day, k_camera=kc and kc["k_camera"])
         key = (out.get("next_candidate") or {}).get("source", "refused")
         count[key] = count.get(key, 0) + 1
