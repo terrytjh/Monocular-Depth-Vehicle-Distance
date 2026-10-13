@@ -70,6 +70,10 @@ PARAMS = dict(
     read_up=0.06,            # depth read this fraction of the box height above its bottom
     patch=5,                 # depth median over patch x patch (half-resolution map)
     bonnet_px=2,
+    hood_bottom=0.97,        # 2026-10-13 (development, opened Chunk_4), measure --drop-hood: a box whose bottom reaches this
+    hood_width=0.8,          # fraction of the frame height and whose width exceeds hood_width of the frame width is the own
+                             # car's bonnet (comma2k19's bonnet reflects the scene, so static_rows does not find it); off by
+                             # default, which reproduces every earlier output
     dedup_iou=0.7,           # 2026-09-30 evening: two boxes of one frame overlapping by IoU > this are one car (YOLO's NMS
                              # is per class, so a pickup comes out as both car and truck with two track ids); the more
                              # confident box is kept. 0 = off (outputs before this addition)
@@ -323,6 +327,11 @@ def car_ruler_factor(cycles, L, mode, p=PARAMS):
     return float(np.median(c[:, 1]) / np.median(far)), int(len(far))
 
 
+def is_hood(b, h, w):
+    """--drop-hood: the box is the own car's bonnet (PARAMS hood_bottom / hood_width)."""
+    return b[3] >= PARAMS["hood_bottom"] * h and (b[2] - b[0]) > PARAMS["hood_width"] * w
+
+
 def dedup(boxes, iou_max):
     """Of two boxes overlapping by IoU > iou_max keep the more confident one; order otherwise unchanged."""
     if not iou_max:
@@ -471,6 +480,7 @@ def cmd_measure(a):
     frames = D.list_frames(Path(a.frames))
     h, w = cv2.imread(str(frames[0])).shape[:2]
     bonnet = D.static_rows(frames)[0]
+    drop_hood = bool(getattr(a, "drop_hood", False))
     k, fps, step = res.get("k"), res["fps"], res["step"]
     g = a.k_guard if a.k_guard is not None else PARAMS["k_guard"]
     if g and k is not None and not (1 / g <= k <= g):
@@ -505,7 +515,7 @@ def cmd_measure(a):
         stem = frames[fi].stem
         wd = D.lines_for(dict(windows=res["windows"]), fi / step) if res.get("windows") else {}
         objs = []
-        cand = [b for b in tr.get(stem, []) if b[6] >= 0 and b[4] >= PARAMS["min_conf"]
+        cand = [b for b in tr.get(stem, []) if not (drop_hood and is_hood(b, h, w)) and b[6] >= 0 and b[4] >= PARAMS["min_conf"]
                 and b[3] < bonnet - PARAMS["bonnet_px"]]
         cand = dedup(cand, a.dedup_iou if a.dedup_iou is not None else PARAMS["dedup_iou"])
         depth = None
@@ -574,6 +584,8 @@ def cmd_measure(a):
     if smooth != "none":
         out.update(distance_smooth=smooth, distance_smooth_params=DIST_SMOOTH[smooth])
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    if drop_hood:
+        out.update(drop_hood=dict(bottom=PARAMS["hood_bottom"], width=PARAMS["hood_width"]))
     Path(a.out).write_text(json.dumps(out))
     n_obj = sum(len(s["objects"]) for s in samples)
     lanes = {}
@@ -785,8 +797,9 @@ C2K19_CAM = dict(f=910.0, cx=582.0, radar_to_camera_m=1.52)
 
 def params_out(**extra):
     """The parameters written into an output file: PARAMS without the scoring-only radar_processing_m (added 2026-10-02,
-    after the second and third versions were sealed), so measurement outputs stay byte-identical to theirs."""
-    return dict({k: v for k, v in PARAMS.items() if k != "radar_processing_m"}, **extra)
+    after the second and third versions were sealed) and the --drop-hood pair (added 2026-10-13; written as drop_hood
+    when the option is on), so measurement outputs stay byte-identical to theirs."""
+    return dict({k: v for k, v in PARAMS.items() if k not in ("radar_processing_m", "hood_bottom", "hood_width")}, **extra)
 
 
 def c2k19_score(cars, tdir, return_rows=False):
@@ -1136,6 +1149,9 @@ def main():
     m.add_argument("--distance-smooth", choices=("none", *DIST_SMOOTH), default="none",
                    help="2026-10-02: reported distance smoothed along each track (ts16: Theil-Sen over +-0.8 s); "
                         "relative speed still from the raw readings")
+    m.add_argument("--drop-hood", action="store_true",
+                   help="2026-10-13 (development): boxes that are the own car's bonnet (PARAMS hood_bottom / hood_width) "
+                        "are not measured as cars (the ground ruler's road-row mask is unchanged)")
     mc = sub.add_parser("measure-c", help="method C (lane markings only) distances on the same tracks")
     for x in ("--frames", "--tracks", "--marking", "--out"):
         mc.add_argument(x, required=True)
