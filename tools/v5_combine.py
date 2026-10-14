@@ -62,7 +62,30 @@ def average_rel(out, mrk, p=V5):
     return n
 
 
-def combine(dep, mrk, p=V5, rel_average=False):
+def average_dist(out, mrk):
+    """--dist-average (2026-10-14, development on opened data; off = unchanged): where marking geometry has a distance for
+    the same car at the same sample, a reading inside the depth ruler's reach reports the mean of the two methods' distances
+    (their errors correlate 0.53-0.65 on the main road groups of Chunk_2 / 4 / 5 / 6, and the mean was better on all four;
+    not on local roads, where marking geometry reads 4-6 % short -- the caller decides by road class). Readings flagged
+    beyond the reach are left as they are; both distances are kept in the file."""
+    md = {}
+    for s in mrk.get("samples", []):
+        for o in s.get("objects", []):
+            if o.get("dist") is not None:
+                md[(s["fi"], o["id"])] = o["dist"]
+    n = 0
+    for s in out.get("samples", []):
+        for o in s.get("objects", []):
+            m = md.get((s["fi"], o["id"]))
+            if o.get("far") or o.get("dist") is None or m is None:
+                continue
+            o["dist_depth"], o["dist_marking"] = o["dist"], m
+            o["dist"] = 0.5 * (o["dist"] + m)
+            n += 1
+    return n
+
+
+def combine(dep, mrk, p=V5, rel_average=False, dist_average=False):
     out = copy.deepcopy(dep)
     out["v5"] = dict(params=dict(p), method="fifth version: scale check + mean ego of depth and marking geometry")
     if dep.get("status") == "refused":
@@ -116,6 +139,8 @@ def combine(dep, mrk, p=V5, rel_average=False):
     out["v5"].update(ego_bins_combined=used, abs_windows_combined=n_abs)
     if rel_average and m_ok:
         out["v5"].update(rel_average=True, rel_readings_averaged=average_rel(out, mrk, p))
+    if dist_average and m_ok:
+        out["v5"].update(dist_average=True, dist_readings_averaged=average_dist(out, mrk))
     return out
 
 
@@ -125,10 +150,11 @@ def main():
     ap.add_argument("--marking", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--rel-average", action="store_true", help="development: relative speed = mean of the two methods")
+    ap.add_argument("--dist-average", action="store_true", help="distance inside the reach = mean of the two methods")
     a = ap.parse_args()
     dep = json.loads(Path(a.depth).read_text())
     mrk = json.loads(Path(a.marking).read_text()) if Path(a.marking).exists() else None
-    res = combine(dep, mrk, rel_average=a.rel_average)
+    res = combine(dep, mrk, rel_average=a.rel_average, dist_average=a.dist_average)
     Path(a.out).write_text(json.dumps(res, indent=1))
     v = res.get("v5", {})
     print(f"wrote {a.out}: {res.get('status', 'ok')} {res.get('reason', '')} ego bins combined {v.get('ego_bins_combined')}, "
