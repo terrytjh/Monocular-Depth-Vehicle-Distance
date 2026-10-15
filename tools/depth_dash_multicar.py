@@ -972,7 +972,7 @@ def cmd_score_batch(a):
 AV2_OPEN = {"c865c156", "cf5aaa11", "dc9077b9", "f668074d"}     # development logs; the four sealed ones stay closed
 
 
-def av2_cuboids(log_dir: Path, stems, allow_sealed=False):
+def av2_cuboids(log_dir: Path, stems, allow_sealed=False, frames_name="pinhole"):
     """Per frame stem: vehicle cuboids projected into the front camera (lidar annotations, track uuid) with the
     forward distance from the camera to the cuboid's nearest face and the cuboid centre's lateral offset (m, left
     positive); and the ego speed per frame from the poses. Refuses a log whose annotations are not on disk, and a
@@ -982,7 +982,14 @@ def av2_cuboids(log_dir: Path, stems, allow_sealed=False):
     ann_p = log_dir / "annotations.feather"
     if not ((log_dir.name[:8] in AV2_OPEN or allow_sealed) and ann_p.exists()):
         raise SystemExit(f"{log_dir.name}: not an open development log (or sealed predictions) with annotations on disk; refusing")
-    meta = json.loads((log_dir / "pinhole_meta.json").read_text())
+    raw = None
+    if frames_name not in ("frames", "frames_pinhole"):    # the older pinhole frames (frame_idx names) and their metadata
+        meta = json.loads((log_dir / "pinhole_meta.json").read_text())
+    else:                                          # frames named by timestamp (tools/av2_fetch.py), official calibration
+        ci = pd.read_feather(log_dir / "calibration/intrinsics.feather")
+        ci = ci[ci.sensor_name == "ring_front_center"].iloc[0]
+        meta = dict(fx=ci.fx_px, fy=ci.fy_px, cx=ci.cx_px, cy=ci.cy_px)
+        raw = (ci.k1, ci.k2, ci.k3) if frames_name == "frames" else None    # frames_pinhole = undistorted, same K
     ann = pd.read_feather(ann_p)
     ann = ann[ann.category.isin({"REGULAR_VEHICLE", "LARGE_VEHICLE", "BUS", "BOX_TRUCK", "TRUCK", "SCHOOL_BUS",
                                  "ARTICULATED_BUS", "TRUCK_CAB", "VEHICULAR_TRAILER"})]
@@ -996,8 +1003,11 @@ def av2_cuboids(log_dir: Path, stems, allow_sealed=False):
     extr = extr[extr.sensor_name == "ring_front_center"].iloc[0]
     cam_T_ego = np.linalg.inv(E.SE3((extr.qw, extr.qx, extr.qy, extr.qz), (extr.tx_m, extr.ty_m, extr.tz_m)))
     K = np.array([[meta["fx"], 0, meta["cx"]], [0, meta["fy"], meta["cy"]], [0, 0, 1]])
-    fr = pd.read_csv(log_dir / "pinhole_frames.csv")
-    ts_of = dict(zip(fr.frame_idx.astype(str), fr.timestamp_ns))
+    if frames_name not in ("frames", "frames_pinhole"):
+        fr = pd.read_csv(log_dir / "pinhole_frames.csv")
+        ts_of = dict(zip(fr.frame_idx.astype(str), fr.timestamp_ns))
+    else:
+        ts_of = {st: int(st) for st in stems if st.isdigit()}
     ann_ts = np.unique(ann.timestamp_ns.values)
 
     def pose_at(ts):
@@ -1018,8 +1028,14 @@ def av2_cuboids(log_dir: Path, stems, allow_sealed=False):
                     Ch = (cam_T_ego @ M @ C).T[:, :3]
                     if (Ch[:, 2] <= 0.5).any():
                         continue
-                    uv = (K @ Ch.T).T
-                    uv = uv[:, :2] / uv[:, 2:3]
+                    if raw is None:
+                        uv = (K @ Ch.T).T
+                        uv = uv[:, :2] / uv[:, 2:3]
+                    else:                                  # radial distortion of the raw frames (AV2 model)
+                        xn = Ch[:, :2] / Ch[:, 2:3]
+                        r2 = (xn ** 2).sum(axis=1, keepdims=True)
+                        xd = xn * (1 + raw[0] * r2 + raw[1] * r2 ** 2 + raw[2] * r2 ** 3)
+                        uv = np.c_[K[0, 0] * xd[:, 0] + K[0, 2], K[1, 1] * xd[:, 1] + K[1, 2]]
                     cubs.append(dict(box=[float(uv[:, 0].min()), float(uv[:, 1].min()), float(uv[:, 0].max()), float(uv[:, 1].max())],
                                      gt=float(Ce[:, 0].min()) - float(extr.tx_m), lat=float(Ce[:, 1].mean() - extr.ty_m),
                                      uuid=str(a.track_uuid)))
@@ -1049,7 +1065,7 @@ def cmd_score_av2(a):
     frames = D.list_frames(fdir)
     h, w = cv2.imread(str(frames[0])).shape[:2]
     bonnet = D.static_rows(frames)[0]
-    gt, speed = av2_cuboids(log_dir, [f.stem for f in frames], allow_sealed=bool(a.verify_sealed))
+    gt, speed = av2_cuboids(log_dir, [f.stem for f in frames], allow_sealed=bool(a.verify_sealed), frames_name=fdir.name)
     clip = lambda b: [max(0.0, b[0]), max(0.0, b[1]), min(float(w), b[2]), min(float(h), b[3])]
     seq_by_ours, seq_by_gt, n_match, n_gt = {}, {}, 0, 0
     match_at = {}
