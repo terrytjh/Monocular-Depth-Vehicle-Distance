@@ -99,7 +99,8 @@
 **不變的事**
 
 - 預測程式與預測都不改。`methods/B_depth_lane_ruler/` 中本登錄檔以外的檔與 `09f3df1` 完全相同,`run_joint.sh` 在 2026-10-18 23:57:27 與 10-19 02:28:53 啟動時都核對過。
-- 第 3.1 節 9 條預期的門檻與判定方式都不改,要改的只有括號裡的開發數字,改正後全部仍在門檻內。
+- 第 3.1 節 9 條預期的門檻都不改;要改的是第 3.1 節的依據與各條括號裡的說明(開發數字,以及第 6 條兩版關係的說明),改正後全部仍在門檻內;
+  判定方式只在第 7 條補上找到率的算法(第 18 點)。
   例外:共用設定在封存前若沒有改成中心欄 615,主要配對改照 582(第 C 節)。
 - 原文的主要配對(615、每趟例外、582 敏感度)、第 6、7 條與「v9 另報」,都要用到現行共用設定與程式沒有的功能
   (設定檔中心欄是 582;一個方法對一批只能封存一次),無法照原文評分;做法見第 C 節。
@@ -114,26 +115,28 @@
      與第八版封存的 `_cars_v8.json` 逐檔相同,也就是第八版。第九版的試跑是 `/mnt/d/depth_work/v9dry/run`
      (紀錄寫「S8=1; registered files 7b4f99d1fa8d0228」,與第九版盲測相同)。
    - 重算:`prereg_dev/rescore_settled_7a_fix.py`(用 `decisions_20261018/g1/rescore_lib.py`)與另一支不引用它的程式
-     (`/mnt/d/depth_work/audit_chunk8_20261019/dryrun/rescore_own.py`)結果相同;都在本機,真值產生前會放進本 repo(第 C 節)。
+     (`/mnt/d/depth_work/audit_chunk8_20261019/dryrun/rescore_own.py`)結果相同;兩支程式目前都在本機,在任何真值產生之前都 commit 進本 repo
+     (不論第 C 節走優先做法或備案)。
 2. **兩版並沒有共用追蹤(第 1 節「兩版共用同一份追蹤與深度快取…」、第 4 節第 3 步、第 6 條括號)**
    - 第 1 節那句改為:「兩版是兩次分開的 `run.py` 執行(`run_joint.sh`:先 v9d、後 v9),各用自己的工作資料夾(`work_v9d`、`work_v9`)
      從影格重做整個第九版流程(偵測、追蹤、虛線尺、標線幾何與各步量測),只共用 DA3 與 MoGe-2 的深度圖快取(`cache_da3`、`cache_moge2`);
      設定上兩版只差相機 k。」
    - 第 4 節第 3 步改為:「3. 預測:先跑 v9d:`run.py --segments-root segments --ids splits/batches/comma2k19_chunk8.txt
      --out-root predictions/B_depth_lane_ruler/v9d --work work_v9d --da3-cache cache_da3 --moge-cache cache_moge2
-     --camera-k-from-dev blind_v4 blind_v5 blind_v7 blind_v8 blind_v9`(路徑都在 `/mnt/d/depth_work/joint/chunk8/` 下);
+     --camera-k-from-dev blind_v4 blind_v5 blind_v7 blind_v8 blind_v9`(`segments`、`predictions`、`work_*`、`cache_*` 在 `/mnt/d/depth_work/joint/chunk8/` 下;
+     `run.py` 與 `splits/` 在共用 repo;開發包是本 repo `data/output/dash_scale/` 下的資料夾);
      跑完後用同一指令跑 v9,改成 `--out-root predictions/B_depth_lane_ruler/v9 --work work_v9`,不加 `--camera-k-from-dev`。不讀任何答案。」
    - 第 6 條括號改為:「(設定上只差相機 k;開發上兩版的 k 相差約 1%;開發時的 v9d 檢查沿用 v9 封存的追蹤,第 8 包則兩版各自追蹤;方向不預設)」。
    - 依據:`run_joint.sh` 第 37–38 行;`run_joint.log`「v9d start 2026-10-18 23:57:27」。這條流程在開發資料上重跑時輸出逐檔相同
-     (2026-10-18,5 段,`/mnt/d/depth_work/runpy_check/compare_runs.py`)。
+     (2026-10-18,第 7 包後半 4 段共 75 個輸出檔;其中 1 段另連深度圖一起重算再跑一次,21 個輸出檔也相同;`/mnt/d/depth_work/runpy_check/compare_runs.py`)。
 3. **第 1 節「2026-10-18 實作與檢查 v9d 時就是這五包」**
    改為:「2026-10-18 實作 v9d 時定的是這五包。在第 7 包後半檢查 v9d 時,受檢的 `blind_v9` 不能當自己的開發包,只用 `blind_v4`、`blind_v5`、`blind_v7`、
-   `blind_v8` 四包(白天 356 段、夜間 18 段)。第 8 包用五包:白天 407 段、夜間 23 段。`blind_v2`(Chunk_3)的預測檔放在 `pred/` 子資料夾,
+   `blind_v8` 四包(白天 356 段、夜間 18 段)。第 8 包用五包:白天 407 段、夜間 23 段。`blind_v2`(Chunk_3 的 142 段與 Chunk_1 的 7 段)的預測檔放在 `pred/` 子資料夾,
    `dev_constants.py` 照現在的寫法讀不到,所以沒有放進來。」
 4. **60 m 以外的讀值(第 1 節「輸出規則同第九版(量到 60 m 以外的讀值不給數字)」)**
    - 事實:`run.py` 轉成共同格式時照原值寫出所有距離。第 7 包後半的轉換檢查中,69,665 筆有距離的讀值有 20,030 筆(v9)、19,959 筆(v9d)> 60 m,沒有一筆留空。
    - 照原文執行:封存前用一支只讀預測、在封存前 commit 的轉換程式,把共同格式 `objects.csv` 中 `dist_m` > 60 m 的列的 `dist_m` 留空
-     (SPEC 3.3、7.2;速度欄不動,因為第九版的 60 m 規則只用在距離,`tools/v8_score.py` 第 161–162 行);框與 `flag` 保留給配對。
+     (SPEC 3.3、7.2;速度欄不動,因為第九版的 60 m 規則只用在距離,`tools/v8_score.py` 第 84–86、161–162 行);框與 `flag` 保留給配對。
      轉換前的檔另存,用本 repo 的 `tools/seal_predictions.py` 一起封存。
    - 影響(開發):中心欄 615 時,真值 30 m 內沒有受影響的讀值;582 時主要組有 34–45 筆(第 7 包後半 v9:中位誤差 4.25 → 4.20%,誤差 > 25% 的比例 4.29 → 3.27%)。
 5. **第 3 節「主要」的配對:共用設定裡沒有 615**
@@ -141,8 +144,8 @@
      評分器整批只用一個中心欄,敏感度只平移真值距離、不重新配對;盲測評分只接受封存時記錄的設定。做法見第 C 節。
 6. **第 3 節「次要」:`tools/v9_score.py` 需要本 repo 格式的封存與真值**
    改為:「次要(只拿來和本 repo 第七到九版對照,不當主要結果):共用封存的同時,另用 `tools/seal_predictions.py` 為 `work_v9d`、`work_v9` **各寫一份**封存
-   (以檔名為鍵,兩版不能合在一份):`--files` 含該版的 `*_dash.json`、`*_tracks*.json`、`*_run.json`、`*_cars*.json`,`--also` 含 `k_camera.json`、
-   `k_night.json`、`car_a.json`、`grey.json`、`dev_constants.json`,`--absent` 含本 repo 真值資料夾裡第 8 包的 208 個段名;封存檔複製到 `docs/seals/` 並推上本 repo。
+   (以檔名為鍵,兩版不能合在一份):`--files` 含該版的 `*_dash.json`、`*_tracks*.json`、`*_run.json`、`*_run_ca.json`、`*_cars*.json`,`--also` 含
+   `run_list.txt`、`tags_*.txt`、`grey.json`、`k_camera.json`、`k_camera_also.json`、`k_night.json`、`car_a.json`、`dev_constants.json`(沒有的檔略過),`--absent` 含本 repo 真值資料夾裡第 8 包的 208 個段名;封存檔複製到 `docs/seals/` 並推上本 repo。
    全部封存之後,才用 `tools/c2k19_extract.py truth` 產生本 repo 格式的真值,再以 `tools/v9_score.py` 照第九版登錄的規則(雷達 − 0.33 m、50% 閘)評一次。」
 7. **第 4 節第 4 步:一個方法對一批只能封存一次**
    改為:「4. 封存:照共用 repo `docs/SPEC.md` 第 6 節,用共用 repo 的 `mddbench`(validate、check-frames、seal;Terry 2026-10-19 同意由本方法執行)。
@@ -153,7 +156,7 @@
 
 8. **相機 A**:「相機 A 照第九版」補上:由 `blind_v3`、`blind_v4`、`blind_v5`、`blind_v7`、`blind_v8` 已封存的標線幾何結果學(第二台車 34 趟、427 段,A = 1,071.8),
    不用 `blind_v9`;重算的 `car_a.json` 與 `blind_v9/car_a.json` 相同。
-9. **v9 的相機 k**:白天從本批自己的預測學,夜間從本批與 `blind_v5` 已封存的預測一起學(`tools/run_v8.sh` 第 74–78 行),都不看真值。
+9. **v9 的相機 k**:白天從本批自己的預測學,夜間從本批與 `blind_v5` 已封存的預測一起學(`tools/run_v8.sh` 第 73–78 行),都不看真值。
 10. **輸入**:影格與 `segment.json` 由 `/mnt/d/depth_work/joint/chunk8/decode_chunk8.py`、`make_segment_json.py` 照共同格式產生,沒有用 mddbench 的
     `prepare-comma2k19`、`label-segments`。`video.hevc` 經標準輸入(`-i pipe:0`)送入解碼器,`segment.json` 的 `command` 欄照共同格式記成 `-i {video}`;
     改用檔案輸入重解一段,影格雜湊相同。
@@ -162,7 +165,8 @@
     影格以連結接到本 repo 的 `data/input/c2k19_own`(2026-10-18 22:19),供對照表程式讀取。
 12. **中心欄 615 的依據(第 3 節「第二台車相機重裝後」)**
     第二台車 Chunk_6、7 主要組直路的消失點在 611–617 px(`/mnt/d/depth_work/bearing_20261018/NOTES.md`)。照第 20 點的算法,各趟(全部段)的消失點:
-    2018-06-25 21:14 那趟以前 12 趟 587.4–591.5 px(中位 589.1),22:19 那趟起 44 趟中位 614.8 px(只有 2018-08-07 00:46 那趟、2 段,577.6 px 偏離 10 px 以上);
+    到 2018-06-25 21:14 那趟為止的 12 趟 587.4–591.5 px(中位 589.1),22:19 那趟起有值的 44 趟中位 614.8 px(另 1 趟 2018-07-20 16:42 沒有足夠的時窗;
+    只有 2018-08-07 00:46 那趟、2 段,577.6 px 偏離 615 達 10 px 以上);
     第一台車(Chunk_2)21 趟中位 597.9 px(`/mnt/d/depth_work/joint/chunk8/addendum1/vp_per_drive_dev.txt`)。「相機重裝」是由這個跳變推定的,沒有官方或書面紀錄。
     第 8 包的 19 趟都在 2018-08-08 以後。開發包(v9d 的相機 k、相機 A)含跳變以前的趟。
 13. **移動中的目標**:前車真值絕對速度的大小 ≥ 7.2 km/h(絕對速度 = 定位的自車速 + 雷達相對速度,取絕對值;對向車也算)。
@@ -172,8 +176,9 @@
     路類照第二到九版依畫面線索判定;方法 B 的虛線週期照第九版(`ca_local` 7.32 m,`ca_highway` 與 `unknown` 14.63 m)。
 15. **真值取法**:第 3.1 節依據用本 repo 的真值檔(每個雷達軌跡取影格前 0.05 s 內最後一筆);共用的 `truth-comma2k19` 取前後 0.05 s 內最近的一筆。
     改用後者重算:主要組低 0.07–0.14 個百分點(v9 後半 3.97%、v9d 後半 3.83%、v9 前半試跑 3.80%);白天一般道路、夜間相差在 0.1 個百分點內;
-    公尺分段相差 ≤ 0.06 m;都在門檻內。
-16. **「4.21–4.98%」**:是第七到九版各在自己那一批盲測的結果(第八版 Chunk_7 前半 4.21%、第七版 Chunk_6 4.98%、第九版 Chunk_7 後半 4.98%)。
+    公尺分段:主要組相差 ≤ 0.06 m(白天一般道路與夜間的 0–10 m、夜間 10–20 m 讀值少,差 0.07–0.20 m;第 2 條只看主要組);都在門檻內。
+16. **「4.21–4.98%」**:是第七到九版各在自己那一批盲測預測上的數字(第八版 Chunk_7 前半 4.21%、第九版 Chunk_7 後半 4.98% 是各自的盲測結果;
+    第七版 Chunk_6 4.98% 是第七版盲測評分後、2026-10-14 開發時改以真值 30 m 內重算的,見第八版登錄第 0 節第 3 點)。
     同一版在不同包之間差到約 0.9 個百分點:第八版前半 4.21%、後半 5.10%;第九版前半試跑 4.06%、後半 4.98%。
 17. **第 5 條括號**改為「(開發 2.94、3.48;前半試跑的自車速與第八版逐筆相同)」:照定案規則(1 秒格、同幀真值平均、每格至少 3 筆)重算是 2.94、3.48。
 18. **第 7 條括號**改為「(開發三組都是。找到率以真值 30 m 內、在評分範圍內的目標計;另報評分器的全距離找到率)」。
@@ -181,6 +186,7 @@
 19. **合併雜湊**:每段一行「segment_id 空格 segment.json 的 sha256」,依 segment_id 字典序排列(本機 `c2656b4c…`)。預測開始時(2026-10-18 23:57:27)
     還沒和組員核對,和 SPEC 第 6 節第 1 點「一致才開始預測」不同;改在封存前核對。不一致時先用 `compare_segments.py` 逐段比 `frames_sha256`、張數、
     解碼器雜湊與標籤(換行不同也會讓雜湊不同),只有影格不同的段才重跑預測;封存用本機這份 `segment.json`(預測時讀的就是它)。
+    用 `check-frames --segment-list splits/batches/comma2k19_chunk8.txt`(清單不是字典序)會算出 `89570816…`,不是 `c2656b4c…`。
 20. **每趟消失點的算法**(只用預測、不讀真值,在看任何第 8 包的值之前寫定):對該趟每一段 `work_v9d` 裡的 `*_run.json`,取左右兩條本車道線都有的時窗,
     以兩線交點計算(線為 x = a·y + b;y = (b_R − b_L)/(a_L − a_R),x = a_L·y + b_L),只留 0 < x < 1164、200 < y < 700 的時窗;
     有至少 10 個這種時窗的段取 x 的中位數;再取該趟所有段(含拒發段與非主要組段)的中位數。程式 `/mnt/d/depth_work/joint/chunk8/addendum1/vp_per_drive_rule.py`,
@@ -208,13 +214,17 @@
   - 共用 repo 只封存 v9d;v9 在任何真值產生之前,用本 repo 的 `tools/seal_predictions.py` 封存並推上本 repo。
 - **兩種情形都一樣**:
   - 共用 repo 的 `truth-comma2k19` 只要有任何一份封存就准許產生真值(`mddbench/splits.py` 第 35 行),不會檢查兩個方法、所有版本是否都已封存。
-    兩邊約定:v9d、v9(含只在本 repo 的封存)、本 repo 在真值前另外登錄的版本與方法 A 都封存並推上之後,任何一方才產生真值。
+    本方法的做法(SPEC 第 6 節第 5 點的延伸,待組員同意):v9d、v9(含只在本 repo 的封存)、本 repo 在真值前另外登錄的版本與方法 A 都封存並推上之後,
+    任何一方才產生真值。
+  - 第 3.1 節依據的重算程式(`prereg_dev/`、`rescore_lib.py`、`rescore_own.py`)在任何真值產生之前 commit 進本 repo。
   - 封存前比對 `work_v9d` 與 `work_v9` 中不用到相機 k 的檔(`_dash`、`_tracks`、`_run`、`_cars_c` 等),有不同就照實報告(也能抓到重開機後 GPU 環境改變的影響)。
 
 ### D. 補充(不改任何規則)
 
 - v9d 的相機 k 在 2026-10-18 23:57:35 算出(兩邊推送之後、第一張深度圖 23:58:03 之前):白天 0.8948、夜間 0.7871;第 8 包的趟都不在開發包內,所以每段的值相同。
-- 工作資料夾不是 git repo,所以第九版自己「核對登錄 commit」的步驟在這裡不適用(`run_v9d.log` 開頭的 git 錯誤訊息就是這個原因);改由 `run_joint.sh`
-  每次啟動時核對 `09f3df1`,執行中再由登錄檔總和 `b84b83721dc6ca83` 確認沒有改動。
+- 工作資料夾不是 git repo,所以第九版開頭記錄 commit 與未 commit 狀態的幾行(`run_v9.sh` 第 45 行、`run_v8.sh` 第 31 行)會印出 git 錯誤訊息
+  (`run_v9d.log` 開頭),紀錄裡的 commit 是空的,「uncommitted: 0 paths, diff sha256 e3b0c44298fc1c14」也只是 git 失敗時的空值;第九版自己核對登錄 commit 的步驟
+  (`run_v9.sh` 第 190–193 行)要有 `WANT` 檔才執行,這裡不適用。改由 `run_joint.sh` 每次啟動時核對 `09f3df1`;另外每次啟動時記下登錄檔總和
+  `b84b83721dc6ca83`(共用 repo 複本改過 `cd` 行後的值),跑完、封存步驟之前(`run_v9.sh` 第 189 行)再比對一次。
 - 共用封存的 `code_commit` 是來源 repo 的 `5aff285`;`run.py` 以 `meta.json` 的 `run_py_sha256` 識別,`dev_constants.py` 以 `run_joint.sh` 對 `09f3df1` 的核對為準。
 - 共用 repo 目前不公開,文中引用的共用 repo commit 與檔案,要等它公開後外人才能核對。
