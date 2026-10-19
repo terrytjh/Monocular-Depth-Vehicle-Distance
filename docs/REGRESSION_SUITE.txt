@@ -1,0 +1,123 @@
+# 方法 B 回歸測試組(regression suite)
+#
+# 目的(Terry 2026-10-19):方法以後每改一次,都在同一小組固定的段上跑,並且分組報告,
+# 一項改動若在某個資料集 / 條件變好、另一個變差,一眼就看得到。只用答案已經開過的開發資料。
+#
+# 選段規則(先寫規則、再照規則選;選段時沒有看任何誤差數字):
+#  1. 候選池 = 答案已開過的 comma2k19 盲測批次:blind_v3(Chunk_2,第一台車)、blind_v4(Chunk_4)、
+#     blind_v5(Chunk_5)、blind_v7(Chunk_6)、blind_v8(Chunk_7 前半)、blind_v9(Chunk_7 後半)。
+#     組別照各批預測前寫的 tags_main.txt / tags_local_day.txt / tags_night.txt
+#     (main = 白天高速公路 + 判不清;local_day = 白天一般道路;night = 夜間)。
+#  2. 不收:第 8 包(/mnt/d/depth_work/joint/ 底下任何東西)、Chunk_9 / Chunk_10、Chunk_1 全部
+#     (chunk13_status.csv 的 Chunk_1 列;程式另外核對池裡沒有)、RADIal;dev52(Chunk_3)也不收:
+#     它只有第二版的輸出、分組方式不同(dayhw / localday,沒有夜間清單),第二台車重裝前的趟已由 Chunk_4 涵蓋。
+#  3. 只收 DA3 深度快取已經存在且不是空資料夾的段(這次不用 GPU):blind_v4–v9 用
+#     data/output/dash_scale/cache/<批>/<段>/;blind_v3 的 cache/blind_v3 已在 10/2 刪除,改用
+#     /mnt/d/depth_work/improve/chunk2/cache/<段>/(10/13 由本 repo tools/run_v4.sh 的 depth 模式重建的 DA3 快取)。
+#     另外該段要在該批的 seal.json 裡、真值檔(radar.csv、ego.csv)要存在(只看檔案在不在,不讀內容)。
+#  4. 分層 = (車, 組, 批);第二台車在 Chunk_4 再分相機重裝前 / 後(2018-06-25--22-19-02 那趟起算重裝後)。配額:
+#     第一台車(只在 Chunk_2):main 6、local_day 4、night 4 = 14 段;
+#     第二台車每批:main 4、local_day 2、night 2 = 8 段,五批共 40 段;Chunk_4 每組重裝前 / 後各一半
+#     (main 2 + 2、local_day 1 + 1、night 1 + 1)。合計 54 段。層裡的段不夠就照實少選,不從別層補。
+#  5. 每層裡:把該層的趟(drive)用種子打亂,輪流從每一趟隨機抽 1 段,直到配額滿;
+#     任何一趟在整組(各組合計)最多 3 段。層的處理順序固定:第一台車(main、local_day、night),
+#     再第二台車依批次 blind_v4、v5、v7、v8、v9,每批 main、local_day、night(Chunk_4 每組先重裝前、再重裝後)。
+#  6. 種子 20261019(Python random.Random);所有輸入先排序再打亂,所以重跑結果相同。
+#  7. comma2k19 之外另收兩組「只評自車速」的開發片,全收不抽:
+#     海盛 hs_rerun 三支(hs002、hs005、hs006;10/3 用本 repo 程式從原始影片重跑並封存;參考值 = 海盛交付的
+#     人工畫格法分段車速,報「差距」不報「誤差」;只寫代號,不寫任何案件資訊),
+#     台灣網路片 blind_v4_tw 裡疊字有車速的兩支(yt_Pa1I2nT9FuQ、yt_yh0klTheNfU_s600;參考值 = 封存後逐秒讀的疊字車速
+#     osd_speed.json;不叫誤差,報偏差與 95% 一致界限)。這兩組都沒有距離真值。
+#  8. 選段程式只讀:各批 tags_*.txt、seal.json 的檔名、快取資料夾在不在、真值檔在不在、chunk13_status.csv 的段名。
+#     不讀任何分數檔、真值內容或預測內容。寫這份規則前看過 tools/v10_params.json 裡三個開發批的彙總數字
+#     (各批整體,不是逐段);沒有看過任何逐段的誤差。
+#  9. 這組固定不改。要改(加段、換段)就另開新版本的組,舊組照舊保留,報告寫明用哪一版的組。
+#
+# 規則檔 /mnt/d/depth_work/regression_20261019/RULE.txt(sha256 566885ddb081827e549bf1efe6056cf311d503534eb759e288eaa7a7a42c692c,寫定 2026-10-19 09:19:31 CST);選段執行 2026-10-19 09:24:37 CST,tools/regression_suite.py select --seed 20261019。
+# 選段時沒有看任何誤差數字:選段程式不讀分數檔、真值內容或預測內容。
+#
+# 各層:車 | 批 | 組 | 重裝 | 配額 | 池裡段數 | 池裡趟數 | 選到
+#   car1 | blind_v3 | main | - | 6 | 82 | 10 | 6
+#   car1 | blind_v3 | local_day | - | 4 | 28 | 11 | 4
+#   car1 | blind_v3 | night | - | 4 | 83 | 9 | 4
+#   car2 | blind_v4 | main | before | 2 | 77 | 7 | 2
+#   car2 | blind_v4 | main | after | 2 | 34 | 3 | 2
+#   car2 | blind_v4 | local_day | before | 1 | 20 | 8 | 1
+#   car2 | blind_v4 | local_day | after | 1 | 11 | 3 | 1
+#   car2 | blind_v4 | night | before | 1 | 49 | 3 | 1
+#   car2 | blind_v4 | night | after | 1 | 12 | 1 | 1
+#   car2 | blind_v5 | main | any | 4 | 124 | 10 | 4
+#   car2 | blind_v5 | local_day | any | 2 | 44 | 10 | 2
+#   car2 | blind_v5 | night | any | 2 | 42 | 3 | 2
+#   car2 | blind_v7 | main | any | 4 | 146 | 9 | 4
+#   car2 | blind_v7 | local_day | any | 2 | 36 | 8 | 2
+#   car2 | blind_v7 | night | any | 2 | 24 | 1 | 2
+#   car2 | blind_v8 | main | any | 4 | 54 | 6 | 4
+#   car2 | blind_v8 | local_day | any | 2 | 21 | 6 | 2
+#   car2 | blind_v8 | night | any | 2 | 25 | 2 | 2
+#   car2 | blind_v9 | main | any | 4 | 54 | 8 | 4
+#   car2 | blind_v9 | local_day | any | 2 | 22 | 6 | 2
+#   car2 | blind_v9 | night | any | 2 | 25 | 4 | 2
+# 池外(不收)的段:blind_v3 local_day no depth cache 1; blind_v4 main no depth cache 2; blind_v5 main no depth cache 1
+# 各組段數:car1 main 6、car1 local_day 4、car1 night 4、car2 main 20、car2 local_day 10、car2 night 10;comma2k19 合計 54 段(趟數 47,每趟最多 2 段);海盛 3 支、台灣 2 支(只評自車速)。
+#
+# 欄位:segment|batch|car|group|chunk|mount|depth_cache|moge2_cache(chunk:Chunk_7a = Chunk_7 前半 blind_v8、Chunk_7b = 後半 blind_v9;mount = 第二台車相機重裝前 / 後;moge2_cache 只供參考,第八版起的流程在白天要用,'-' = 沒有,重跑完整流程時要先用 GPU 補)
+b0c9d2329ad1606b_2018-10-22--11-21-08_35|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-22--11-21-08_35|-
+b0c9d2329ad1606b_2018-08-18--18-20-55_39|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-08-18--18-20-55_39|-
+b0c9d2329ad1606b_2018-10-09--14-06-32_10|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-09--14-06-32_10|-
+b0c9d2329ad1606b_2018-09-15--17-50-36_76|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-15--17-50-36_76|-
+b0c9d2329ad1606b_2018-09-23--12-52-06_48|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-23--12-52-06_48|-
+b0c9d2329ad1606b_2018-09-21--09-50-40_30|blind_v3|car1|main|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-21--09-50-40_30|-
+b0c9d2329ad1606b_2018-09-24--12-49-08_34|blind_v3|car1|local_day|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-24--12-49-08_34|-
+b0c9d2329ad1606b_2018-08-18--18-20-55_47|blind_v3|car1|local_day|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-08-18--18-20-55_47|-
+b0c9d2329ad1606b_2018-10-09--15-48-37_24|blind_v3|car1|local_day|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-09--15-48-37_24|-
+b0c9d2329ad1606b_2018-10-22--11-21-08_38|blind_v3|car1|local_day|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-22--11-21-08_38|-
+b0c9d2329ad1606b_2018-10-05--21-20-29_8|blind_v3|car1|night|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-05--21-20-29_8|-
+b0c9d2329ad1606b_2018-09-23--23-24-40_10|blind_v3|car1|night|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-23--23-24-40_10|-
+b0c9d2329ad1606b_2018-10-05--22-20-31_15|blind_v3|car1|night|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-10-05--22-20-31_15|-
+b0c9d2329ad1606b_2018-09-13--22-01-21_15|blind_v3|car1|night|Chunk_2|-|/mnt/d/depth_work/improve/chunk2/cache/b0c9d2329ad1606b_2018-09-13--22-01-21_15|-
+99c94dc769b5d96e_2018-06-09--19-18-40_37|blind_v4|car2|main|Chunk_4|before|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-09--19-18-40_37|-
+99c94dc769b5d96e_2018-06-25--10-11-05_28|blind_v4|car2|main|Chunk_4|before|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-25--10-11-05_28|-
+99c94dc769b5d96e_2018-06-27--15-03-44_13|blind_v4|car2|main|Chunk_4|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-27--15-03-44_13|-
+99c94dc769b5d96e_2018-07-02--19-08-27_13|blind_v4|car2|main|Chunk_4|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-07-02--19-08-27_13|-
+99c94dc769b5d96e_2018-06-12--18-52-46_0|blind_v4|car2|local_day|Chunk_4|before|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-12--18-52-46_0|-
+99c94dc769b5d96e_2018-07-02--09-20-11_39|blind_v4|car2|local_day|Chunk_4|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-07-02--09-20-11_39|-
+99c94dc769b5d96e_2018-06-18--21-20-21_13|blind_v4|car2|night|Chunk_4|before|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-18--21-20-21_13|-
+99c94dc769b5d96e_2018-06-25--22-19-02_15|blind_v4|car2|night|Chunk_4|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4/99c94dc769b5d96e_2018-06-25--22-19-02_15|-
+99c94dc769b5d96e_2018-07-06--11-17-49_9|blind_v5|car2|main|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-06--11-17-49_9|-
+99c94dc769b5d96e_2018-07-06--18-18-36_8|blind_v5|car2|main|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-06--18-18-36_8|-
+99c94dc769b5d96e_2018-07-05--16-30-16_14|blind_v5|car2|main|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-05--16-30-16_14|-
+99c94dc769b5d96e_2018-07-05--10-05-06_28|blind_v5|car2|main|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-05--10-05-06_28|-
+99c94dc769b5d96e_2018-07-03--10-35-30_37|blind_v5|car2|local_day|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-03--10-35-30_37|-
+99c94dc769b5d96e_2018-07-05--19-49-34_23|blind_v5|car2|local_day|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-05--19-49-34_23|-
+99c94dc769b5d96e_2018-07-04--00-20-19_14|blind_v5|car2|night|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-04--00-20-19_14|-
+99c94dc769b5d96e_2018-07-05--20-49-41_11|blind_v5|car2|night|Chunk_5|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v5/99c94dc769b5d96e_2018-07-05--20-49-41_11|-
+99c94dc769b5d96e_2018-07-09--14-08-31_27|blind_v7|car2|main|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-09--14-08-31_27|-
+99c94dc769b5d96e_2018-07-11--18-22-01_25|blind_v7|car2|main|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-11--18-22-01_25|-
+99c94dc769b5d96e_2018-07-12--16-42-23_11|blind_v7|car2|main|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-12--16-42-23_11|-
+99c94dc769b5d96e_2018-07-10--14-21-51_31|blind_v7|car2|main|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-10--14-21-51_31|-
+99c94dc769b5d96e_2018-07-11--18-22-01_30|blind_v7|car2|local_day|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-11--18-22-01_30|-
+99c94dc769b5d96e_2018-07-12--16-42-23_8|blind_v7|car2|local_day|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-12--16-42-23_8|-
+99c94dc769b5d96e_2018-07-12--22-14-39_14|blind_v7|car2|night|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-12--22-14-39_14|-
+99c94dc769b5d96e_2018-07-12--22-14-39_13|blind_v7|car2|night|Chunk_6|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v7/99c94dc769b5d96e_2018-07-12--22-14-39_13|-
+99c94dc769b5d96e_2018-07-20--10-39-03_30|blind_v8|car2|main|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-20--10-39-03_30|/mnt/d/depth_work/cache_v8_moge2/99c94dc769b5d96e_2018-07-20--10-39-03_30
+99c94dc769b5d96e_2018-07-20--16-43-04_6|blind_v8|car2|main|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-20--16-43-04_6|/mnt/d/depth_work/cache_v8_moge2/99c94dc769b5d96e_2018-07-20--16-43-04_6
+99c94dc769b5d96e_2018-07-19--15-34-31_15|blind_v8|car2|main|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-19--15-34-31_15|/mnt/d/depth_work/cache_v8_moge2/99c94dc769b5d96e_2018-07-19--15-34-31_15
+99c94dc769b5d96e_2018-07-20--20-16-28_9|blind_v8|car2|main|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-20--20-16-28_9|/mnt/d/depth_work/cache_v8_moge2/99c94dc769b5d96e_2018-07-20--20-16-28_9
+99c94dc769b5d96e_2018-07-20--16-07-46_8|blind_v8|car2|local_day|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-20--16-07-46_8|/mnt/d/depth_work/v9dry/moge_cache/99c94dc769b5d96e_2018-07-20--16-07-46_8
+99c94dc769b5d96e_2018-07-19--15-34-31_7|blind_v8|car2|local_day|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-19--15-34-31_7|/mnt/d/depth_work/v9dry/moge_cache/99c94dc769b5d96e_2018-07-19--15-34-31_7
+99c94dc769b5d96e_2018-07-27--21-00-35_7|blind_v8|car2|night|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-27--21-00-35_7|-
+99c94dc769b5d96e_2018-07-26--21-25-46_7|blind_v8|car2|night|Chunk_7a|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v8/99c94dc769b5d96e_2018-07-26--21-25-46_7|-
+99c94dc769b5d96e_2018-07-23--09-23-24_30|blind_v9|car2|main|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-07-23--09-23-24_30|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-07-23--09-23-24_30
+99c94dc769b5d96e_2018-07-26--11-09-01_26|blind_v9|car2|main|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-07-26--11-09-01_26|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-07-26--11-09-01_26
+99c94dc769b5d96e_2018-07-27--11-39-28_26|blind_v9|car2|main|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-07-27--11-39-28_26|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-07-27--11-39-28_26
+99c94dc769b5d96e_2018-08-03--14-04-02_26|blind_v9|car2|main|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-08-03--14-04-02_26|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-08-03--14-04-02_26
+99c94dc769b5d96e_2018-08-07--10-03-55_56|blind_v9|car2|local_day|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-08-07--10-03-55_56|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-08-07--10-03-55_56
+99c94dc769b5d96e_2018-08-03--14-04-02_22|blind_v9|car2|local_day|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-08-03--14-04-02_22|-
+99c94dc769b5d96e_2018-07-24--20-31-30_5|blind_v9|car2|night|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-07-24--20-31-30_5|/mnt/d/depth_work/cache_v9_moge2/99c94dc769b5d96e_2018-07-24--20-31-30_5
+99c94dc769b5d96e_2018-08-07--00-46-34_1|blind_v9|car2|night|Chunk_7b|after|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v9/99c94dc769b5d96e_2018-08-07--00-46-34_1|-
+hs1230car_002|hs_rerun|hs|haisheng_ego|-|-|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/hs_rerun/hs1230car_002|-
+hs1230car_005|hs_rerun|hs|haisheng_ego|-|-|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/hs_rerun/hs1230car_005|-
+hs1230car_006|hs_rerun|hs|haisheng_ego|-|-|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/hs_rerun/hs1230car_006|-
+yt_Pa1I2nT9FuQ|blind_v4_tw|tw|taiwan_ego|-|-|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4_tw/yt_Pa1I2nT9FuQ|-
+yt_yh0klTheNfU_s600|blind_v4_tw|tw|taiwan_ego|-|-|/home/terry/Monocular-Depth-Vehicle-Distance/data/output/dash_scale/cache/blind_v4_tw/yt_yh0klTheNfU_s600|-
