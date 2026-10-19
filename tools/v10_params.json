@@ -1,0 +1,621 @@
+{
+ "version": "v10",
+ "status": "values chosen by the rules above (rules unchanged since 2026-10-19 04:34:42 CST)",
+ "rules_written_local": "2026-10-19 04:35 CST",
+ "what": "Parameters of tools/v10_post.py (tenth version = ninth version + D1 + C2 + C4 + C5, post-processing of the ninth version's own per-segment files). Chosen on opened development data only.",
+ "development_batches": {
+  "C6": "comma2k19 Chunk_6, data/output/dash_scale/blind_v7 (seventh version, sealed; *_cars_v7.json, marking cars *_cars_c.json)",
+  "C7a": "comma2k19 Chunk_7 first half, /mnt/d/depth_work/v9dry/run (ninth-version dry run with S7 + S8, not sealed; groups from blind_v8)",
+  "C7b": "comma2k19 Chunk_7 second half, data/output/dash_scale/blind_v9 (ninth version, sealed)"
+ },
+ "scoring_for_choosing": "settled shared rules, own re-implementation /mnt/d/depth_work/decisions_20261018/g1/rescore_lib.py (S rules): second car truth = processed radar - 0.70 m, matching centre column 615 (589 before 2018-06-25--22-19-02), first car - 0.33 m and 598; truth <= 30 m; readings beyond 60 m carry no number. Distance: |error| % per scored reading. Relative speed: |rel_kmh - radar per-frame v_rel| on scored readings that carry a ninth-version relative speed. Ego speed: |per-second value - mean pose speed over the second's 20 frames| on seconds where the ninth version has a value.",
+ "candidate_grids_seen": "The grids and objectives below are the ones of the leave-one-batch-out folds of /mnt/d/depth_work/v10dev_20261019/candidates-distance (c1_camk_avg.py) and candidates-speed (lobo_ego.py, lobo_rel.py). Their per-fold tables (two batches at a time) and, for D1, the per-batch grid table were computed and read before this rule was written; the three-batch objectives for C2, C4 and C5 had not been computed.",
+ "rules": {
+  "general": "One value per parameter, chosen with the same grid and the same objective as the folds, the objective taken over all three development batches C6, C7a, C7b instead of two. Ties = equal when rounded to the precision the candidate tables print (0.01 percentage point for distance, 0.001 km/h for speed); a tie goes to the simpler value in the order given per parameter. Order: D1; C2 per group; C4; C5 on top of the chosen C4; then the 95 % range factors with the chosen values. The leave-one-batch-out fold numbers of the candidate steps stay the honest estimate; in-sample numbers with the fixed values are only a check.",
+  "D1": "Grid w in {0.25, 0.4, 0.5, 0.6, 0.75, 1.0} x smoothing in {off, on} (Theil-Sen along the track over +-4 samples that have a value, >= 3) x ratio gate in {none, 1.3}. Objective: the mean over the three batches of the main group's pooled median |error| (%) on the same readings. Simpler: no gate, then no smoothing, then w closer to 0.5.",
+  "C2": "Per group (main, local_day, night): grid h in {1, 2, 3, 4, 5, 6, 8, 10} s x weighting in {none, 1 / max(95 % half-width, 0.5 km/h)^2}. Objective: the pooled per-second MAE (km/h) over the group's seconds of the three batches where the ninth version has a value. Simpler: unweighted, then smaller h.",
+  "C2_range": "Per group and per source of the second (both methods averaged / depth alone, from the ninth version's ego entry): factor = 95th percentile over the three batches of |error| / the ninth version's 95 % half-width, for the chosen h and weighting; a source with fewer than 30 seconds in the group takes the group's pooled factor. The tenth version's half-width = factor x the ninth version's.",
+  "C4": "Grid of window sets (half-widths in 0.2 s samples, the longest complete one used, 4 = the registered +-0.8 s): {4}, {6,4}, {8,6,4}, {10,8,6,4}, {12,10,8,6,4}, {16,12,10,8,6,4}. Objective: the pooled MAE (km/h) over all three groups of the three batches. Simpler: the shorter set.",
+  "C5": "Grid D in {none, 28, 30, 32, 35, 40} m with the chosen C4 window set. The folds chose D on all three groups with the extension applied in every group; the tenth version applies it in the main group only (no help on local roads and at night in the candidate step), so the objective is the pooled MAE (km/h) over the main group's readings of the three batches (only these depend on D). Simpler: smaller D (none first).",
+  "rel_range": "One factor for the relative speed's registered 95 % half-width (1.96 x 3.4 x sigma): the 95th percentile of |error| / that half-width over all three groups of the three batches, for the tenth version's relative speed (chosen C4 everywhere, C5 in the main group).",
+  "abs": "No parameter. Absolute speed = the tenth version's ego speed of the reading's second + the tenth version's relative speed, where both exist; 95 % half-width = hypot of the two half-widths. Not fitted; its coverage is reported only as a check."
+ },
+ "values": {
+  "D1": {
+   "w": 0.75,
+   "smooth": true,
+   "gate": null,
+   "smooth_half_samples": 4,
+   "smooth_min_n": 3,
+   "geometry_max_s": 1.0,
+   "min_rows_below_horizon": 3.0,
+   "far_ruler": {
+    "apply_from": null,
+    "class_min_tracks": 3,
+    "frame_width": 1164
+   },
+   "applies_to": "segments whose ninth-version output is the camera-k fallback (next_candidate.source 'camera k day' / 'camera k night'), every group; readings inside the camera-k reach with a marking-geometry distance"
+  },
+  "C2": {
+   "main": {
+    "h_s": 6,
+    "weighted": true,
+    "min_halfwidth_kmh": 0.5,
+    "min_seconds_for_line": 3,
+    "range_factor": {
+     "both": 0.6043,
+     "depth": 0.6392
+    },
+    "range_factor_note": "per source of the second: both = both methods averaged (the ninth version's ego entry has kmh_marking), depth = depth alone; a source with < 30 development seconds takes the group's pooled factor (0.605); seconds per source {'both': 9682, 'depth': 132}"
+   },
+   "local_day": {
+    "h_s": 3,
+    "weighted": true,
+    "min_halfwidth_kmh": 0.5,
+    "min_seconds_for_line": 3,
+    "range_factor": {
+     "both": 0.7447,
+     "depth": 0.684
+    },
+    "range_factor_note": "per source of the second: both = both methods averaged (the ninth version's ego entry has kmh_marking), depth = depth alone; a source with < 30 development seconds takes the group's pooled factor (0.744); seconds per source {'both': 1577, 'depth': 105}"
+   },
+   "night": {
+    "h_s": 4,
+    "weighted": false,
+    "min_halfwidth_kmh": 0.5,
+    "min_seconds_for_line": 3,
+    "range_factor": {
+     "both": 1.0374,
+     "depth": 1.0253
+    },
+    "range_factor_note": "per source of the second: both = both methods averaged (the ninth version's ego entry has kmh_marking), depth = depth alone; a source with < 30 development seconds takes the group's pooled factor (1.0253); seconds per source {'both': 284, 'depth': 22}"
+   }
+  },
+  "C4": {
+   "halfwidths_samples": [
+    12,
+    10,
+    8,
+    6,
+    4
+   ],
+   "max_jump": 0.15,
+   "m_rel": 3.4,
+   "note": "the longest complete window per method, then the registered rule (mean of the two methods where the ninth version averaged, depth alone otherwise); sigma = hypot(slope se, |v| x ruler scale sigma), mean's sigma = 0.5 hypot, 95 % half-width = 1.96 x 3.4 x sigma x rel_range_factor"
+  },
+  "C5": {
+   "groups": [
+    "main"
+   ],
+   "D_m": 40
+  },
+  "rel_range_factor": 1.4323,
+  "abs": {
+   "rule": "ego of the reading's second (floor(frame / fps)) from the tenth version + the tenth version's relative speed, where both exist; 95 % half-width = hypot of the two half-widths"
+  }
+ },
+ "values_chosen_local": "2026-10-19 04:45:32 CST",
+ "grid_results": {
+  "note": "objectives over all three development batches (C6, C7a, C7b with the ninth version), computed 2026-10-19 04:45 CST by /mnt/d/depth_work/v10build_20261019/build-post/choose_params.py from the candidate steps' own rows",
+  "D1": {
+   "objective": "mean over C6 / C7a / C7b of the main group's pooled median |error| % (same readings)",
+   "grid": [
+    {
+     "params": {
+      "w": 0.25,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.8207,
+      "C7a": 3.6724,
+      "C7b": 3.8368
+     },
+     "objective_mean_pct": 4.11
+    },
+    {
+     "params": {
+      "w": 0.25,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.8339,
+      "C7a": 3.7201,
+      "C7b": 3.8413
+     },
+     "objective_mean_pct": 4.1318
+    },
+    {
+     "params": {
+      "w": 0.25,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.8044,
+      "C7a": 3.6465,
+      "C7b": 3.8079
+     },
+     "objective_mean_pct": 4.0863
+    },
+    {
+     "params": {
+      "w": 0.25,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.8138,
+      "C7a": 3.6927,
+      "C7b": 3.8079
+     },
+     "objective_mean_pct": 4.1048
+    },
+    {
+     "params": {
+      "w": 0.4,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6843,
+      "C7a": 3.633,
+      "C7b": 3.6997
+     },
+     "objective_mean_pct": 4.0057
+    },
+    {
+     "params": {
+      "w": 0.4,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6952,
+      "C7a": 3.6654,
+      "C7b": 3.6997
+     },
+     "objective_mean_pct": 4.0201
+    },
+    {
+     "params": {
+      "w": 0.4,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6431,
+      "C7a": 3.5756,
+      "C7b": 3.6807
+     },
+     "objective_mean_pct": 3.9665
+    },
+    {
+     "params": {
+      "w": 0.4,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6549,
+      "C7a": 3.594,
+      "C7b": 3.6745
+     },
+     "objective_mean_pct": 3.9744
+    },
+    {
+     "params": {
+      "w": 0.5,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6518,
+      "C7a": 3.6214,
+      "C7b": 3.6007
+     },
+     "objective_mean_pct": 3.958
+    },
+    {
+     "params": {
+      "w": 0.5,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6559,
+      "C7a": 3.6294,
+      "C7b": 3.6077
+     },
+     "objective_mean_pct": 3.9643
+    },
+    {
+     "params": {
+      "w": 0.5,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.5585,
+      "C7a": 3.5694,
+      "C7b": 3.5796
+     },
+     "objective_mean_pct": 3.9025
+    },
+    {
+     "params": {
+      "w": 0.5,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.5711,
+      "C7a": 3.5777,
+      "C7b": 3.5748
+     },
+     "objective_mean_pct": 3.9079
+    },
+    {
+     "params": {
+      "w": 0.6,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6472,
+      "C7a": 3.6538,
+      "C7b": 3.5341
+     },
+     "objective_mean_pct": 3.945
+    },
+    {
+     "params": {
+      "w": 0.6,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6536,
+      "C7a": 3.6616,
+      "C7b": 3.5446
+     },
+     "objective_mean_pct": 3.9532
+    },
+    {
+     "params": {
+      "w": 0.6,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.5529,
+      "C7a": 3.5711,
+      "C7b": 3.452
+     },
+     "objective_mean_pct": 3.8586
+    },
+    {
+     "params": {
+      "w": 0.6,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.5645,
+      "C7a": 3.5774,
+      "C7b": 3.452
+     },
+     "objective_mean_pct": 3.8646
+    },
+    {
+     "params": {
+      "w": 0.75,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6995,
+      "C7a": 3.6589,
+      "C7b": 3.4835
+     },
+     "objective_mean_pct": 3.9473
+    },
+    {
+     "params": {
+      "w": 0.75,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.6994,
+      "C7a": 3.6663,
+      "C7b": 3.4865
+     },
+     "objective_mean_pct": 3.9507
+    },
+    {
+     "params": {
+      "w": 0.75,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.5571,
+      "C7a": 3.5912,
+      "C7b": 3.371
+     },
+     "objective_mean_pct": 3.8398
+    },
+    {
+     "params": {
+      "w": 0.75,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.568,
+      "C7a": 3.5979,
+      "C7b": 3.371
+     },
+     "objective_mean_pct": 3.8457
+    },
+    {
+     "params": {
+      "w": 1.0,
+      "smooth": false,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.916,
+      "C7a": 3.8129,
+      "C7b": 3.4591
+     },
+     "objective_mean_pct": 4.0627
+    },
+    {
+     "params": {
+      "w": 1.0,
+      "smooth": false,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.9065,
+      "C7a": 3.8142,
+      "C7b": 3.4525
+     },
+     "objective_mean_pct": 4.0577
+    },
+    {
+     "params": {
+      "w": 1.0,
+      "smooth": true,
+      "gate": null
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.7364,
+      "C7a": 3.7288,
+      "C7b": 3.3744
+     },
+     "objective_mean_pct": 3.9465
+    },
+    {
+     "params": {
+      "w": 1.0,
+      "smooth": true,
+      "gate": 1.3
+     },
+     "per_batch_main_after_pct": {
+      "C6": 4.7364,
+      "C7a": 3.7304,
+      "C7b": 3.371
+     },
+     "objective_mean_pct": 3.9459
+    }
+   ],
+   "tied_at_0_01": [
+    {
+     "w": 0.75,
+     "smooth": true,
+     "gate": null
+    }
+   ]
+  },
+  "C2": {
+   "objective": "pooled per-second MAE km/h over the group's ninth-version seconds of the three batches",
+   "grid": {
+    "main": {
+     "h1": 2.2867,
+     "h1w": 2.2819,
+     "h2": 2.1214,
+     "h2w": 2.098,
+     "h3": 2.0038,
+     "h3w": 1.9733,
+     "h4": 1.9455,
+     "h4w": 1.9117,
+     "h5": 1.9169,
+     "h5w": 1.8801,
+     "h6": 1.9102,
+     "h6w": 1.8669,
+     "h8": 1.9481,
+     "h8w": 1.8963,
+     "h10": 2.0361,
+     "h10w": 1.9812
+    },
+    "local_day": {
+     "h1": 1.8139,
+     "h1w": 1.7824,
+     "h2": 1.7738,
+     "h2w": 1.6179,
+     "h3": 1.8383,
+     "h3w": 1.5356,
+     "h4": 1.9998,
+     "h4w": 1.6375,
+     "h5": 2.1897,
+     "h5w": 1.829,
+     "h6": 2.4648,
+     "h6w": 2.0672,
+     "h8": 2.9771,
+     "h8w": 2.58,
+     "h10": 3.5192,
+     "h10w": 3.0709
+    },
+    "night": {
+     "h1": 3.4624,
+     "h1w": 3.4873,
+     "h2": 3.2175,
+     "h2w": 3.3239,
+     "h3": 3.1366,
+     "h3w": 3.2003,
+     "h4": 3.1212,
+     "h4w": 3.1348,
+     "h5": 3.1822,
+     "h5w": 3.1573,
+     "h6": 3.1918,
+     "h6w": 3.1908,
+     "h8": 3.527,
+     "h8w": 3.5331,
+     "h10": 3.9121,
+     "h10w": 3.8363
+    }
+   },
+   "per_batch_in_sample": {
+    "main": {
+     "Chunk_6": {
+      "v9": 2.8495,
+      "v10": 1.7607,
+      "seconds": 5832
+     },
+     "Chunk_7a": {
+      "v9": 3.4741,
+      "v10": 2.2021,
+      "seconds": 1911
+     },
+     "Chunk_7b": {
+      "v9": 2.9449,
+      "v10": 1.8568,
+      "seconds": 2071
+     }
+    },
+    "local_day": {
+     "Chunk_6": {
+      "v9": 2.2008,
+      "v10": 1.4979,
+      "seconds": 989
+     },
+     "Chunk_7a": {
+      "v9": 2.2508,
+      "v10": 1.8382,
+      "seconds": 318
+     },
+     "Chunk_7b": {
+      "v9": 2.4136,
+      "v10": 1.3785,
+      "seconds": 375
+     }
+    },
+    "night": {
+     "Chunk_6": {
+      "v9": 4.5702,
+      "v10": 4.3905,
+      "seconds": 78
+     },
+     "Chunk_7a": {
+      "v9": 5.5519,
+      "v10": 4.2904,
+      "seconds": 36
+     },
+     "Chunk_7b": {
+      "v9": 3.0857,
+      "v10": 2.3864,
+      "seconds": 192
+     }
+    }
+   }
+  },
+  "C4": {
+   "objective": "pooled MAE km/h over all three groups of the three batches (readings with a ninth-version relative speed, settled S rules, truth <= 30 m, radar per-frame v_rel)",
+   "grid": {
+    "4": 1.9879,
+    "6-4": 1.7594,
+    "8-4": 1.674,
+    "10-4": 1.6483,
+    "12-4": 1.6437,
+    "16-4": 1.655
+   }
+  },
+  "C5": {
+   "objective": "pooled MAE km/h over the main group's readings of the three batches, on the chosen C4",
+   "grid": {
+    "None": 1.649,
+    "28": 1.6171,
+    "30": 1.5771,
+    "32": 1.5274,
+    "35": 1.4926,
+    "40": 1.4863
+   },
+   "note": "40 m is the upper end of the grid (two of the three folds also chose it)"
+  },
+  "rel_range": {
+   "readings": 20569,
+   "factor": 1.4323
+  },
+  "rel_in_sample": {
+   "Chunk_6|main": {
+    "n": 9767,
+    "v9": 2.0211,
+    "v10": 1.5238,
+    "v10_cover95": 95.6
+   },
+   "Chunk_6|local_day": {
+    "n": 2646,
+    "v9": 1.9809,
+    "v10": 1.5435,
+    "v10_cover95": 94.1
+   },
+   "Chunk_6|night": {
+    "n": 202,
+    "v9": 1.8384,
+    "v10": 1.517,
+    "v10_cover95": 92.6
+   },
+   "Chunk_7a|main": {
+    "n": 3368,
+    "v9": 1.9596,
+    "v10": 1.5566,
+    "v10_cover95": 94.5
+   },
+   "Chunk_7a|local_day": {
+    "n": 702,
+    "v9": 1.9881,
+    "v10": 1.4971,
+    "v10_cover95": 94.6
+   },
+   "Chunk_7a|night": {
+    "n": 169,
+    "v9": 2.7325,
+    "v10": 2.5139,
+    "v10_cover95": 97.0
+   },
+   "Chunk_7b|main": {
+    "n": 2793,
+    "v9": 1.7643,
+    "v10": 1.2702,
+    "v10_cover95": 95.7
+   },
+   "Chunk_7b|local_day": {
+    "n": 822,
+    "v9": 2.2779,
+    "v10": 1.7485,
+    "v10_cover95": 91.2
+   },
+   "Chunk_7b|night": {
+    "n": 100,
+    "v9": 2.7909,
+    "v10": 2.4103,
+    "v10_cover95": 87.0
+   }
+  }
+ },
+ "honest_estimate": "The leave-one-batch-out numbers of the candidate steps (/mnt/d/depth_work/v10dev_20261019/REPORT.md), main group, ninth version -> candidate, C6 / C7a / C7b: distance 5.07 -> 4.56 / 3.87 -> 3.59 / 4.12 -> 3.45 %; ego 2.85 -> 1.76 / 3.47 -> 2.20 / 2.95 -> 1.86 km/h; relative (C4 + C5) 2.02 -> 1.53 / 1.96 -> 1.56 / 1.76 -> 1.27 km/h. In-sample numbers with the fixed values are a check only."
+}
