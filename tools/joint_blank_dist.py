@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Before the seal of a joint blind batch (docs/JOINT_CHUNK8_PREREG.md, addendum 1 point 4 and addendum 2 point 6): copy one version's
 shared-format predictions and leave `dist_m` empty where the method gives no number -- beyond 60 m (registered: no number past 60 m)
-and below 0 m (physically impossible; the shared validator refuses it). Every other column and every other file is copied byte for
-byte; the source folder is not changed (it is sealed too, with tools/seal_predictions.py). Reads predictions only, never truth.
+and at or below 0 m (physically impossible; the shared validator accepts only (0, 500] m; addendum 3). The rule applies to every row
+of every segment. Every other column (boxes, speeds) and every other file is copied byte for byte, so a row whose distance is left
+empty can still be matched by its box and scored for speed. With --raw-name, each segment's original objects.csv is also copied
+into the new folder under that name, so the shared seal records it too; the source folder is not changed (it is sealed as well,
+with tools/seal_predictions.py). Reads predictions only, never truth.
 
-  python3 tools/joint_blank_dist.py --src <pred root of one version> --dst <new root> [--max-m 60] [--summary out.json]
+  python3 tools/joint_blank_dist.py --src <pred root of one version> --dst <new root> [--max-m 60] [--raw-name objects_before_blank.csv]
+                                    [--summary out.json]
 """
 import argparse
 import csv
@@ -36,7 +40,7 @@ def blank_objects(src: Path, dst: Path, max_m: float, counts: dict) -> None:
         if d > max_m:
             r[k] = ""
             counts["blanked_beyond_max"] += 1
-        elif d < 0:
+        elif d <= 0:
             r[k] = ""
             counts["blanked_negative"] += 1
     out = io.StringIO(newline="")
@@ -49,18 +53,22 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--dst", required=True)
     ap.add_argument("--max-m", type=float, default=60.0)
+    ap.add_argument("--raw-name", default="", help="also keep each original objects.csv in the new folder under this name")
     ap.add_argument("--summary", default="")
     a = ap.parse_args()
     src, dst = Path(a.src), Path(a.dst)
     if dst.exists() and any(dst.iterdir()):
         raise SystemExit(f"{dst} is not empty")
-    counts = dict(segments=0, readings=0, blanked_beyond_max=0, blanked_negative=0, files_copied=0)
+    counts = dict(segments=0, readings=0, blanked_beyond_max=0, blanked_negative=0, files_copied=0, raw_copies=0)
     for seg in sorted(p for p in src.iterdir() if p.is_dir()):
         counts["segments"] += 1
         (dst / seg.name).mkdir(parents=True, exist_ok=True)
         for f in sorted(seg.iterdir()):
             if f.name == "objects.csv":
                 blank_objects(f, dst / seg.name / f.name, a.max_m, counts)
+                if a.raw_name:
+                    shutil.copyfile(f, dst / seg.name / a.raw_name)
+                    counts["raw_copies"] += 1
             else:
                 shutil.copyfile(f, dst / seg.name / f.name)
                 counts["files_copied"] += 1
