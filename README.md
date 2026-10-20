@@ -51,6 +51,11 @@ comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車�
 | 第四版 | 2026-10-02 04:02(`bec5f39`) | **改用正確的雷達真值**(見下);他車距離改以標線幾何法量到的路面距離校正，並平滑軌跡 | comma2k19 Chunk_4 205 段、台灣網路行車影片 18 支 | 已評分(`docs/DEPTH_DASH_V4_RESULTS.md`) |
 | 第五版 | 2026-10-02 15:17(`ce7d4ec`) | 尺度一致性檢查;自車速取深度法與標線幾何法的平均 | comma2k19 Chunk_5 211 段 | 已評分(`docs/DEPTH_DASH_V5_RESULTS.md`) |
 | 第六版 | 2026-10-02 21:46(`819429c`) | **只改一項**:30 m 以外的距離修正 | 與第五版同一批(登錄時沒有任何真值) | 已評分(同上) |
+| 第七版 | 2026-10-13 22:25(`b80a0ec`) | 引擎蓋誤偵測的框不量;相機常數補位;同類車的尺;相對速度兩法平均 | comma2k19 Chunk_6 206 段 | 已評分(`docs/DEPTH_DASH_V7_RESULTS.md`) |
+| 第八版 | 2026-10-14 20:44(`4bae320`) | 近距離優先;尺的範圍內距離取兩法平均;白天高速公路的深度改用 MoGe-2 | comma2k19 Chunk_7 前半 100 段 | 已評分(`docs/DEPTH_DASH_V8_RESULTS.md`) |
+| 第九版 | 2026-10-15 22:03(`586cfeb`) | 標線幾何法改用整台相機的常數;白天一般道路的深度改用 MoGe-2 | comma2k19 Chunk_7 後半 101 段 | 已評分(`docs/DEPTH_DASH_V9_RESULTS.md`) |
+| 共同盲測(第九版 v9d / v9) | 2026-10-18 23:51(`f5078ab`) | 方法同第九版;v9d 的相機常數只從開發資料學 | comma2k19 Chunk_8 208 段,團隊共同評分規則 | 已評分(`docs/JOINT_CHUNK8_RESULTS.md`) |
+| 第十版 | 2026-10-19 08:07(`bcf3105`) | v9d 輸出的後處理:相機常數補位段的距離與標線幾何法平均;自車速、相對速度用較長的時間窗 | 與共同盲測同一批(不算共同成績) | 已評分(`docs/DEPTH_DASH_V10_RESULTS.md`) |
 
 文件:各版的 `docs/DEPTH_DASH_V*_PREREG.md`(登錄)與 `docs/DEPTH_DASH_V*_RESULTS.md`(結果);
 開發過程(每次看答案的時間與內容)`docs/TERRY_DEV_LOG.md`;封存雜湊 `docs/seals/`。
@@ -61,6 +66,33 @@ comma2k19 處理後的雷達距離已經是 CAN 訊號 LONG_DIST 加上 2.70 m(o
 (開發時約 520 萬筆;第四版評分前對 Chunk_4 205 段 3,915,426 筆再確認，全部 2.70 m)，並以法定車牌尺寸與車寬交叉檢查。
 第二、三版登錄的距離真值「雷達 + 2.37 m」因此遠了 2.70 m;正確真值 = 雷達 − 0.33 m。**第二、三版的距離數字不能當成準度**
 (照登錄保留，事後重算寫在各結果文件文末的追記);自車速、相對速度與他車絕對速度不受影響。第四版起一開始就用正確真值。
+
+## 結果(第 8 包共同盲測與第十版，`docs/JOINT_CHUNK8_RESULTS.md`、`docs/DEPTH_DASH_V10_RESULTS.md`)
+
+comma2k19 Chunk_8 全部 208 段(兩條路線都沒用過)。同組兩條路線在同一批資料、同一份真值、同一套評分規則下各自盲測:
+兩邊各自登錄、預測、封存,全部封存並推上 GitHub 之後才建真值。評分程式 `mddbench` 由組員 chennnlee 撰寫,評分規則由兩人共同訂定
+(兩台車的雷達參考點分別校正、配對中心依相機安裝、只算移動中的目標、車寬閘等),**和下面第四到九版用的規則不同,數字不能跨節直接比較**。
+這裡只報告我的方法;兩個方法怎麼比較,由團隊與指導老師決定。
+
+白天高速公路含看不出來的 126 段,真值 30 m 內:
+
+| | 第九版 v9d(共同成績) |
+|---|---|
+| 距離中位誤差 | **3.49%(0.70 m)**,偏差 +0.38%;10–20 / 20–30 m 為 0.57 / 0.83 m |
+| 他車相對速度 MAE | **1.95 km/h**(95% 範圍覆蓋 94.8%) |
+| 自車速每秒 MAE | **3.33 km/h**(覆蓋 95.3%;有自車速的秒佔 54.6%) |
+| 白天一般道路(43 段)/ 夜間(39 段)距離 | 3.73% / 7.32% |
+
+- 事前寫下的 9 條預期 8 條達成;**未達成**:夜間 ≤ 7.0%(7.32%)。兩台車雷達參考點的不確定度約 0.3–0.5 m,敏感度見結果文件第 3 節。
+- **第十版**(只在本 repo 報告,不算共同成績;同一批讀值,本 repo 的真值檔):距離 3.58 → **3.23%**(0.72 → 0.64 m)、
+  相對速度 1.96 → **1.49 km/h**、自車速 3.33 → **2.13 km/h**;11 條預期全部達成。急加減速的 15 秒變差(8.04 → 12.31 km/h);
+  自車速與相對速度用到之後幾秒的影格,只能事後分析。
+
+**第七到九版**(本 repo 的規則:雷達 − 0.33 m、評分程式的 50% 閘;每版一批,批與批之間不直接比):
+- 第七版(Chunk_6,主要組 146 段):本車道距離(尺的範圍內)5.71%、相對速度 2.20 km/h、自車速 2.85 km/h;9 條預期 8 條達成。
+- 第八版(Chunk_7 前半,54 段):真值 30 m 內 **4.21%(0.84 m)**,同一批第七版 5.55%(44 段中 30 段變好);10 條預期 8 條達成。
+- 第九版(Chunk_7 後半,54 段):真值 30 m 內 4.98%(1.00 m),同一批第八版 5.10%(18 / 17 段,差異不顯著);
+  白天一般道路 5.15 → **3.11%**;9 條預期 6 條達成、1 條部分達成。
 
 ## 結果(第五、六版盲測，正確真值，`docs/DEPTH_DASH_V5_RESULTS.md`)
 
@@ -112,6 +144,9 @@ comma2k19 Chunk_4,白天高速公路含看不出來的 113 段(答案從未讀�
 
 我在專題中另外負責研究架構與文獻、五個度量深度模型的評估與海盛人工真值比對。
 
+2026-10 起兩條路線在 comma2k19 Chunk_8 做共同盲測(見上方結果):評分程式 `mddbench` 由 chennnlee 撰寫,評分規則兩人共同訂定;
+兩個方法維持各自獨立,本 repo 只放我的方法與成績。
+
 ## 安裝
 
 ```bash
@@ -129,6 +164,7 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 | UniDepth v2 | https://github.com/lpiccinelli-eth/UniDepth | 8d8cfe4 | CC BY-NC 4.0 |
 | Depth Pro | https://github.com/apple/ml-depth-pro | 9e65e4d | Apple AMLR |
 | Depth Anything V2(Small) | https://github.com/DepthAnything/Depth-Anything-V2 | a561b84 | Apache 2.0(僅 Small) |
+| MoGe-2(第八版起,權重 `Ruicheng/moge-2-vitl-normal`) | https://github.com/microsoft/MoGe | 74fbce0 | MIT |
 
 **偵測器**:Ultralytics 官方 `yolov8m-seg.pt`(sha256 51fa7e5e…)，放在 `checkpoints/`。
 
@@ -159,6 +195,14 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 | `tools/c2k19_pool.py` | 只讀 zip 目錄列出盲測候選段，並查名稱是否出現過 |
 | `tools/score_extra_v3.py`、`tools/score_extra_v4.py`、`tools/score_extra_v5.py` | 各版結果文件中的額外評分(關閘、真值 < 30 m、配對比較與符號檢定),封存後才執行 |
 | `tools/hood_check_v5.py` | 第五版結果的事後檢查:關閘時引擎蓋被偵測成車的影響 |
+| `tools/run_v7.sh`、`tools/run_v8.sh`、`tools/run_v9.sh` | 第七到九版的預測步驟(同樣同時輸出前面各版) |
+| `tools/next_combine.py`、`tools/camera_k.py`、`tools/day_night.py` | 第七版:相機常數補位、同類車的尺、相對速度平均 |
+| `tools/v8_depth_swap.py`、`tools/moge_backend.py` | 第八版:改用 MoGe-2 深度 |
+| `tools/car_a.py`、`tools/v9_local_swap.py` | 第九版:整台相機的標線常數;白天一般道路改用 MoGe-2 |
+| `tools/v10_post.py`、`tools/v10_params.json` | 第十版的後處理與參數 |
+| `tools/v7_score.py`、`tools/v8_score.py`、`tools/v9_score.py`、`tools/v10_score.py` | 各版的評分(封存後才執行) |
+| `tools/joint_blank_dist.py`、`tools/joint_group_summary.py`、`tools/joint_own_score.py`、`tools/joint_chunk8/` | 共同盲測:封存前的格式轉換、分組彙總、依共同規則的獨立評分 |
+| `tools/regression_suite.py` | 固定的回歸測試組(開發資料),每一版都在同一組段上比較 |
 | `tools/report/demo_*.py` | 示範影片 |
 
 `tools/av1_*.py`、`tools/av2_*.py` 是 Argoverse 1/2 的下載、準備與評分;`tools/haisheng_manual_truth.py` 讀海盛的人工畫格法真值。
