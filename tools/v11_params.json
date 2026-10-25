@@ -1,0 +1,70 @@
+{
+ "version": "v11",
+ "status": "development values, not registered: the rules of /mnt/d/depth_work/v11dev_20261020/V11_RULES_DRAFT.txt (written 2026-10-21 00:03 CST) taken over unchanged",
+ "rules_written_local": "2026-10-21 00:03 CST",
+ "what": "Parameters of tools/v11_post.py (eleventh version = tenth version + K4 + K2-ego + E1, a post-processing step on the tenth version's per-segment files). Chosen on opened development data only (Chunk_6, Chunk_7 first and second half); Chunk_8 was only a reference, because the three changes were thought of after its answers were opened.",
+ "development_batches": {
+  "C6": "comma2k19 Chunk_6, data/output/dash_scale/blind_v7 (seventh version, sealed; ninth-version file *_cars_v7.json), tenth version rebuilt by tools/v10_post.py",
+  "C7a": "comma2k19 Chunk_7 first half, /mnt/d/depth_work/v9dry/run (ninth-version dry run, not sealed; groups from blind_v8), tenth version rebuilt by tools/v10_post.py",
+  "C7b": "comma2k19 Chunk_7 second half, data/output/dash_scale/blind_v9 (ninth version, sealed), tenth version rebuilt by tools/v10_post.py",
+  "C8_reference_only": "comma2k19 Chunk_8, the joint blind batch (v9d, sealed) and data/output/dash_scale/blind_v10; its answers were opened 2026-10-20 19:24, before these changes were thought of, so it cannot confirm them"
+ },
+ "scoring_for_choosing": "settled shared rules as re-implemented in /mnt/d/depth_work/decisions_20261018/g1/rescore_lib.py (S rules): second car truth = processed radar - 0.70 m, matching centre column 615 (589 before 2018-06-25--22-19-02), first car - 0.33 m and 598; truth <= 30 m; readings beyond 60 m or <= 0 m carry no number. Ego speed truth: mean pose speed over the second's 20 frames.",
+ "sources": {
+  "rules": {"file": "/mnt/d/depth_work/v11dev_20261020/V11_RULES_DRAFT.txt", "sha256": "4dd48d816bb3985ace4a99640fa3eb00f55b3179b77224ac7ea9199c6d0ebb2b"},
+  "candidate_test": {"file": "/mnt/d/depth_work/v11dev_20261020/REPORT.md", "sha256": "57a48ecaee2f19355ecddfebccdbf269be41428f72bdcbf2a3f2ef0192c49e35"},
+  "range_factors": {"file": "/mnt/d/depth_work/v11dev_20261020/out/ranges/factors.json", "sha256": "449cbd403a6bc2356a22bb0f01d0b13533275d55798fcdc9e0443e31d49a1d41"},
+  "range_factors_text": {"file": "/mnt/d/depth_work/v11dev_20261020/out/ranges/factors.txt", "sha256": "5a0ce28a484be4751680429e10ec1888d6693472a6ac974d91491b4e3eb4e594"},
+  "new_seconds": {"file": "/mnt/d/depth_work/v11dev_20261020/out/ranges/new_seconds.csv", "sha256": "c5dac60720e239ddefe1c6f45518fcfd68b7aad7ac1da131f2300e31c7cca55f"},
+  "tenth_version_parameters": {"file": "tools/v10_params.json", "sha256": "4167ab3442b768487c33e7cc8cbb003a875cb9639cfd04cdb1d9f89b60f90bed"}
+ },
+ "rules": {
+  "K4": "distance, every group: for every sample and object of the tenth-version file, on its boxes before any blanking, cov_front = max over the other objects j of the same sample with y1_j > y1_i + front_px of area(box_i intersect box_j) / max(area(box_i), min_box_area_px2) (0 when there is none); edge = x0_i <= edge_px or x1_i >= image_width_px - edge_px (the bottom edge is not used). cov_front >= cov_front_min or edge, with a distance: dist_v10 = dist, dist = null (no number; a scorer drops it after the matching, as a blank dist_m), k4 = {cov_front, edge}, v11_steps += [K4]. Every other field is unchanged.",
+  "new_ego_seconds": "only segments whose tenth-version file has no ego value at all, whose <tag>_run.json has status ok, and whose camera A (tools/v10_post.camera_A: median of the camera's drive medians, leaving out the segment's own drive) exists. K2-ego: night group and next_candidate.source camera k night. E1: local_day or night group, source current, <tag>_dash.json status not ok, and the ninth-version file has no ego value. The main group is never changed.",
+  "per_second": "per 1 s bin b in [0, floor(n_frames / fps)) of the run: speed pairs with kmh not null and b <= t_s < b + 1 (jump pairs carry no kmh and drop out; unchecked pairs stay); each pair's camera-A speed v = kmh x A_camera / A_local, A_local of the run's ruler entry with frame == frame_i (no entry: the bin is dropped); n >= min_pairs: raw = median(v), sigma_raw = hypot(median_se_factor x sd(v, ddof 1) / sqrt(n), raw x s), s = mean ci_half of the run's lines_used / 1.96 (= depth_dash_multicar.ruler_scale_sigma), hw9 = z x sigma_mult x sigma_raw.",
+  "smoothing": "the tenth version's step_c2 with the group's C2 values below, on the new seconds only (local_day weighted by 1 / max(hw9, min_halfwidth_kmh)^2, night unweighted; >= min_seconds_for_line seconds within +-h_s for a straight line, else the weighted mean). Uses up to h_s seconds after the second: an after-the-fact measurement, as C2.",
+  "range": "sigma_kmh = factor x sigma_raw, ci95_kmh = factor x hw9, factor per (group, path); factor = the 95th percentile over C6, C7a, C7b of |C2 value - mean pose speed of the second| / hw9 (numpy linear percentile, rounded to 4 decimals).",
+  "not_changed": "the segment's ego_refused text, distances (other than K4), relative speeds and absolute speeds; absolute speed is not filled for the new seconds. Refused segments stay refused."
+ },
+ "choices_after_looking": [
+  "E1 only in the local_day and night groups (Terry 2026-10-20 23:4x): in the main group its new seconds had a mean |error| of 3.1-3.4 km/h on C6 / C7a against 1.8-2.2 km/h for the existing seconds (C7b has no such segment).",
+  "night range factor split by path (camera-k / own-ruler): one pooled night factor 0.6049 left the E1 night seconds at 79-92 % leave-one-batch-out coverage.",
+  "the K4 thresholds (30 %, 3 px, nearer box bottom + 2 px) come from the Chunk_8 error analysis."
+ ],
+ "values": {
+  "v10_params_sha256": "4167ab3442b768487c33e7cc8cbb003a875cb9639cfd04cdb1d9f89b60f90bed",
+  "K4": {
+   "cov_front_min": 0.30,
+   "front_px": 2.0,
+   "edge_px": 3.0,
+   "image_width_px": 1164.0,
+   "min_box_area_px2": 1.0,
+   "bottom_edge": false
+  },
+  "ego": {
+   "K2-ego": {"groups": ["night"], "source": "camera k night", "path": "camera-k", "label": "marking, camera A, camera-k path"},
+   "E1": {"groups": ["local_day", "night"], "source": "current", "path": "own-ruler", "label": "marking, camera A, own-ruler path"},
+   "run_status": "ok",
+   "min_pairs": 3,
+   "median_se_factor": 1.253,
+   "z": 1.96,
+   "sigma_mult": 1.9,
+   "C2": {
+    "local_day": {"h_s": 3, "weighted": true, "min_halfwidth_kmh": 0.5, "min_seconds_for_line": 3},
+    "night": {"h_s": 4, "weighted": false, "min_halfwidth_kmh": 0.5, "min_seconds_for_line": 3}
+   },
+   "range_factor": {
+    "local_day": {"own-ruler": 1.1407},
+    "night": {"camera-k": 0.5693, "own-ruler": 0.9349}
+   }
+  }
+ },
+ "values_note": "C2 values = tools/v10_params.json values.C2.local_day / night (h_s, weighted, min_halfwidth_kmh, min_seconds_for_line). min_pairs, median_se_factor, z, sigma_mult = the marking method's own per-second rule (tools/depth_dash_multicar.py ego_bins with the measure-c ego_sigma_mult 1.9).",
+ "honest_estimate": {
+  "note": "leave-one-batch-out coverage of the 95 % range of the new ego seconds (factor learned on the other two development batches), from /mnt/d/depth_work/v11dev_20261020/out/ranges/factors.txt; in-sample numbers with the fixed factors are a check only",
+  "local_day_own_ruler_E1": {"C6": 95.9, "C7a": 94.9, "C7b": 93.0, "seconds": {"C6": 294, "C7a": 78, "C7b": 43}},
+  "night_camera_k_K2_ego": {"C6": 96.8, "C7a": 91.8, "C7b": 95.6, "seconds": {"C6": 593, "C7a": 988, "C7b": 947}},
+  "night_own_ruler_E1": {"C6": 98.2, "C7a": 87.6, "C7b": 91.5, "seconds": {"C6": 171, "C7a": 97, "C7b": 47}},
+  "C8_reference_with_the_three_batch_factors": {"local_day_E1": 95.8, "night_K2_ego": 84.8, "night_E1": 91.8}
+ }
+}
