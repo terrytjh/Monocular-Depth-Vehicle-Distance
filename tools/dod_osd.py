@@ -186,6 +186,10 @@ SETS = {
                          "2026_10_03"),
                    frames=(Path("/mnt/d/depth_work/tw_own/frames_blind1"),),
                    log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads_blind1.log")),
+    "blind2": dict(raw=Path("/mnt/d/depth_work/tw_own/raw_blind2"), files=Path("/mnt/d/depth_work/tw_own/lists/blind2_files.txt"),
+                   sha=Path("/mnt/d/depth_work/tw_own/lists/blind2_sha256.txt"), days=("2026_10_07", "2026_10_08"),
+                   frames=(Path("/mnt/d/depth_work/tw_own/frames_blind2"),),
+                   log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads_blind2.log")),
 }
 INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"

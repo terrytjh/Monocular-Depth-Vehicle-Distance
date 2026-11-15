@@ -108,11 +108,14 @@ FRAMES_ROOT_DEFAULT = TW / "frames_dev"
 LOG_DEFAULT = TW / "logs" / "dod_frames.log"
 # Input sets (--set, default dev). blind1 = the first DOD blind test (docs/DOD_V12_BLIND_PREREG.md): the 60 drawn clips copied
 # from the external drive into raw_blind1 with their sha256 at copy time; frames are written but never shown (no sheet).
+# blind2 = the highway blind test (docs/DOD_V12_BLIND2_PREREG.md), same rules.
 SETS = {
     "dev": dict(raw=TW / "raw_dev", files=TW / "lists" / "dev_front_files.txt", sha=TW / "lists" / "dev_front_sha256.txt",
                 tags=TW / "lists" / "tags_dev.tsv", frames=TW / "frames_dev", log=TW / "logs" / "dod_frames.log"),
     "blind1": dict(raw=TW / "raw_blind1", files=TW / "lists" / "blind1_files.txt", sha=TW / "lists" / "blind1_sha256.txt",
                    tags=TW / "lists" / "tags_blind1.tsv", frames=TW / "frames_blind1", log=TW / "logs" / "dod_frames_blind1.log"),
+    "blind2": dict(raw=TW / "raw_blind2", files=TW / "lists" / "blind2_files.txt", sha=TW / "lists" / "blind2_sha256.txt",
+                   tags=TW / "lists" / "tags_blind2.tsv", frames=TW / "frames_blind2", log=TW / "logs" / "dod_frames_blind2.log"),
 }
 INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"

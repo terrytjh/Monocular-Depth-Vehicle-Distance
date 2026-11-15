@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# First DOD blind test, predictions (docs/DOD_V12_BLIND_PREREG.md section 4, steps 2-4): masked frames -> run list ->
+# DOD blind tests, predictions (SET=blind1: docs/DOD_V12_BLIND_PREREG.md; SET=blind2: docs/DOD_V12_BLIND2_PREREG.md, the
+# highway test; section 4, steps 2-4 of either): masked frames -> run list ->
 # frozen development constants -> tenth and eleventh version (the development pipeline, unchanged) -> twelfth version ->
 # private seals and their public digests. Reads no overlay value and no answer; never looks at a frame.
 # Before: tools/v12/dod_blind_prepare.py copy and tags (they refuse unless the registration is on GitHub).
@@ -9,7 +10,9 @@
 set -u
 REPO=/home/terry/Monocular-Depth-Vehicle-Distance
 TW=/mnt/d/depth_work/tw_own
-RUN=${RUN:-$TW/blind1_v12}; BATCH=dod_blind1
+SET=${SET:-blind1}
+case "$SET" in blind1) PREREG=docs/DOD_V12_BLIND_PREREG.md;; blind2) PREREG=docs/DOD_V12_BLIND2_PREREG.md;; *) echo "unknown SET $SET" >&2; exit 2;; esac
+RUN=${RUN:-$TW/${SET}_v12}; BATCH=dod_$SET
 DEV=$TW/dev_v11; DEVO=$DEV/work/repo/data/output/dash_scale/dod_dev
 PL=$TW/plan_20261028/pipeline/scripts
 SIDES=$TW/v12dev_20261110/out/car_a_sides_dod_h.json
@@ -23,28 +26,28 @@ stop () { log "$*: stopping"; exit 1; }
 cd $REPO
 # ---- 0. checks
 git diff --quiet HEAD -- tools/v12 tools/dod_frames.py tools/dod_osd.py tools/dod_compare.py tools/seal_predictions.py tools/v11 \
-   tools/v10_post.py docs/DOD_V12_BLIND_PREREG.md || stop "the blind-test tools or the registration differ from HEAD"
+   tools/v10_post.py $PREREG || stop "the blind-test tools or the registration differ from HEAD"
 git fetch -q origin main || stop "git fetch failed"
-git merge-base --is-ancestor "$(git log -1 --format=%H -- docs/DOD_V12_BLIND_PREREG.md)" origin/main || stop "the registration is not on origin/main"
+git merge-base --is-ancestor "$(git log -1 --format=%H -- $PREREG)" origin/main || stop "the registration is not on origin/main"
 for f in run_dod.sh dod_workspace.py v11f_params_dod.py ego_export.py; do
   cmp -s "$PL/$f" "tools/v12/dod_pipeline/$f" || stop "$PL/$f differs from the committed copy"
 done
-for f in blind1_files.txt blind1_sha256.txt tags_blind1.tsv; do [ -s "$TW/lists/$f" ] || stop "no lists/$f (dod_blind_prepare.py copy / tags first)"; done
-$P -B tools/v12/dod_blind_prepare.py manifest >> "$LOG" 2>&1 || stop "a private file differs from the registered sha256"
-ls $TW/osd_blind1/* > /dev/null 2>&1 && stop "an overlay output of the blind clips exists"
-log "start (pid $$) HEAD $(git rev-parse --short HEAD)"
+for f in ${SET}_files.txt ${SET}_sha256.txt tags_${SET}.tsv; do [ -s "$TW/lists/$f" ] || stop "no lists/$f (dod_blind_prepare.py copy / tags first)"; done
+$P -B tools/v12/dod_blind_prepare.py --set $SET manifest >> "$LOG" 2>&1 || stop "a private file differs from the registered sha256"
+ls $TW/osd_$SET/* > /dev/null 2>&1 && stop "an overlay output of the blind clips exists"
+log "start (pid $$) SET $SET HEAD $(git rev-parse --short HEAD)"
 # ---- 1. masked frames (CPU)
 if [ ! -e "$RUN/done_frames" ]; then
-  nice -n 10 $P -B tools/dod_frames.py --set blind1 extract --all --res 720 >> "$RUN/logs/frames.log" 2>&1
+  nice -n 10 $P -B tools/dod_frames.py --set $SET extract --all --res 720 >> "$RUN/logs/frames.log" 2>&1
   rc=$?; [ $rc = 0 ] || [ $rc = 3 ] || stop "dod_frames.py extract exit $rc"      # 3 = some clip failed its checks (excluded below)
   touch "$RUN/done_frames"; log "frames done (exit $rc)"
 fi
-[ -e "$RUN/frames" ] || ln -s $TW/frames_blind1 "$RUN/frames"
+[ -e "$RUN/frames" ] || ln -s $TW/frames_$SET "$RUN/frames"
 # ---- 2. run list with the development band; the tags that run
 if [ ! -s "$RUN/lists/run_list.txt" ]; then
-  $P -B tools/dod_frames.py --set blind1 runlist --out-dir "$RUN/lists" --band $BAND >> "$LOG" 2>&1 || stop "runlist"
+  $P -B tools/dod_frames.py --set $SET runlist --out-dir "$RUN/lists" --band $BAND >> "$LOG" 2>&1 || stop "runlist"
   awk -F'|' 'NF{print $1"_"$2"_"$3}' "$RUN/lists/run_list.txt" > "$RUN/lists/only_tags.txt"
-  $P - "$TW/lists/tags_blind1.tsv" "$RUN/lists/only_tags.txt" "$RUN/lists/tags_blind1_run.tsv" <<'PY' || stop "run tag table"
+  $P - "$TW/lists/tags_${SET}.tsv" "$RUN/lists/only_tags.txt" "$RUN/lists/tags_${SET}_run.tsv" <<'PY' || stop "run tag table"
 import csv, sys
 src, only, out = sys.argv[1:]
 keep = set(open(only).read().split())
@@ -97,20 +100,20 @@ for t in $(cat "$RUN/lists/only_tags.txt"); do
 done
 [ $miss = 0 ] || stop "outputs incomplete"
 # ---- 7. private seals and public digests (no overlay output may exist)
-if [ ! -e "$RUN/BLIND1_SEALED" ]; then
+if [ ! -e "$RUN/BLIND_SEALED" ] && [ ! -e "$RUN/BLIND1_SEALED" ]; then
   mkdir -p "$RUN/seals/private" "$RUN/seals/public"
   seal () {   # name, glob, what
     $P tools/seal_predictions.py --files "$2" --also "$RUN/constants/*.json" "$RUN/lists/run_list.txt" "$RUN/lists/tags_*.txt" \
-       "$TW/lists/tags_blind1.tsv" "$TW/lists/blind1_sha256.txt" --absent "$TW/osd_blind1/*" --out "$RUN/seals/private/$1.json" \
+       "$TW/lists/tags_${SET}.tsv" "$TW/lists/${SET}_sha256.txt" --absent "$TW/osd_$SET/*" --out "$RUN/seals/private/$1.json" \
        >> "$RUN/logs/seal.log" 2>&1 || stop "seal $1"
     $P -B tools/v12/dod_seal_check.py digest --seal "$RUN/seals/private/$1.json" --what "$3" \
-       --out "$RUN/seals/public/dod_blind1_$1_seal.json" >> "$LOG" 2>&1 || stop "digest $1"
+       --out "$RUN/seals/public/dod_${SET}_$1_seal.json" >> "$LOG" 2>&1 || stop "digest $1"
   }
-  seal v10 "$RUN/v10/*_cars_v10.json" "first DOD blind test, tenth version, per-clip files"
-  seal v11 "$RUN/v11/*_cars_v11f.json" "first DOD blind test, eleventh version, per-clip files"
-  seal v12 "$RUN/v12/*_cars_v12.json" "first DOD blind test, twelfth version, per-clip files"
-  seal ego_v11 "$RUN/ego/*_ego.csv" "first DOD blind test, eleventh version, per-second ego speed"
-  seal ego_v12 "$RUN/ego_v12/*_ego.csv" "first DOD blind test, twelfth version, per-second ego speed"
-  touch "$RUN/BLIND1_SEALED"; log "sealed: digests in $RUN/seals/public (to be committed to docs/seals and pushed before any overlay read)"
+  seal v10 "$RUN/v10/*_cars_v10.json" "DOD blind test $SET, tenth version, per-clip files"
+  seal v11 "$RUN/v11/*_cars_v11f.json" "DOD blind test $SET, eleventh version, per-clip files"
+  seal v12 "$RUN/v12/*_cars_v12.json" "DOD blind test $SET, twelfth version, per-clip files"
+  seal ego_v11 "$RUN/ego/*_ego.csv" "DOD blind test $SET, eleventh version, per-second ego speed"
+  seal ego_v12 "$RUN/ego_v12/*_ego.csv" "DOD blind test $SET, twelfth version, per-second ego speed"
+  touch "$RUN/BLIND_SEALED"; log "sealed: digests in $RUN/seals/public (to be committed to docs/seals and pushed before any overlay read)"
 fi
 log "end"
