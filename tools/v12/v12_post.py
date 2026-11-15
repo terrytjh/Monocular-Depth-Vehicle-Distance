@@ -9,10 +9,11 @@ two changes, everything else unchanged (same inputs, parameters, order of steps)
      the pair value is the mean over its lines; pairs the run's own speed filter dropped stay dropped. A side without a
      constant from another drive falls back to the single camera A.
   S3 (with --hz-tol) the MC fill is refused for a segment whose own horizon row (its marking run's median) lies more than
-     hz_tol x image height from the camera's usual horizon (tools/v12/car_a_sides.reference_horizon): a wrong horizon
+     hz_tol x image height from the camera's usual horizon (median of the other drives' medians,
+     tools/v12/car_a_sides.reference_horizon): a wrong horizon
      scales every marking distance and speed.
   S2 standing still (tools/v12/stationary.py): a second whose image motion (--stand-key, default the 90th percentile of
-     the road-band flow, motion_p90) is below --stand-thr gets ego 0 km/h with a
+     the road-band flow, motion_p90) is below --stand-thr, in a run of >= --stand-run such seconds, gets ego 0 km/h with a
      95 % half-width of --stand-ci km/h (replacing any value; source "stationary (image motion)"), before the absolute
      speeds are recomputed (abs = ego + relative, as in v11).
 
@@ -29,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import car_a_sides as CS  # noqa: E402
 
-G = dict(sides=None, motion=None, thr=None, ci=None, key="motion_p90", hz_tol=None, tag=None, used={})
+G = dict(sides=None, motion=None, thr=None, ci=None, key="motion_p90", run=1, hz_tol=None, tag=None, used={})
 
 
 def load_v11f(path):
@@ -100,7 +101,19 @@ def patch(F):
             out["v12_stand"] = dict(applied=False, why="no motion file")
             return
         m = json.loads(p.read_text())
-        still = sorted(s["second"] for s in m["seconds"] if s.get(G["key"]) is not None and s[G["key"]] < G["thr"])
+        secs = sorted(m["seconds"], key=lambda s: s["second"])
+        low = [s.get(G["key"]) is not None and s[G["key"]] < G["thr"] for s in secs]
+        still, i = [], 0
+        while i < len(secs):                       # only runs of >= G["run"] consecutive low-motion seconds count as standing
+            if low[i]:
+                j = i
+                while j + 1 < len(secs) and low[j + 1] and secs[j + 1]["second"] == secs[j]["second"] + 1:
+                    j += 1
+                if j - i + 1 >= G["run"]:
+                    still += [secs[q]["second"] for q in range(i, j + 1)]
+                i = j + 1
+            else:
+                i += 1
         ego = out.setdefault("ego", [])
         idx = {int(round(e["t0"])): i for i, e in enumerate(ego)}
         rep = add = 0
@@ -124,7 +137,7 @@ def patch(F):
                 ego.append(dict(t0=float(b), n=0, tier=1, v11_steps=["V12-stand"], **new))
                 add += 1
         ego.sort(key=lambda e: float(e["t0"]))
-        out["v12_stand"] = dict(applied=True, key=G["key"], threshold=G["thr"], ci95_kmh=G["ci"], still_seconds=len(still),
+        out["v12_stand"] = dict(applied=True, key=G["key"], threshold=G["thr"], min_run_s=G["run"], ci95_kmh=G["ci"], still_seconds=len(still),
                                 replaced=rep, added=add, motion_file=str(p))
 
     def step_abs_all(out, info):
@@ -155,6 +168,7 @@ def main():
     ap.add_argument("--stand-thr", type=float, default=None)
     ap.add_argument("--stand-ci", type=float, default=None)
     ap.add_argument("--stand-key", default="motion_p90", help="motion value compared with --stand-thr (default motion_p90)")
+    ap.add_argument("--stand-run", type=int, default=1, help="minimum number of consecutive low-motion seconds (default 1)")
     ap.add_argument("--hz-tol", type=float, default=None, help="S3: refuse the MC fill when the segment's horizon is more than this share of the image height from the camera's (e.g. 0.007)")
     ap.add_argument("--no-sides", action="store_true")
     ap.add_argument("--no-stand", action="store_true")
@@ -169,7 +183,7 @@ def main():
     if not a.no_stand:
         if not (a.motion and a.stand_thr is not None and a.stand_ci is not None):
             sys.exit("--motion, --stand-thr and --stand-ci required (or --no-stand)")
-        G.update(motion=a.motion, thr=a.stand_thr, ci=a.stand_ci, key=a.stand_key)
+        G.update(motion=a.motion, thr=a.stand_thr, ci=a.stand_ci, key=a.stand_key, run=a.stand_run)
     F = load_v11f(a.v11f)
     patch(F)
     sys.argv = [a.v11f] + sys.argv[i + 1:]

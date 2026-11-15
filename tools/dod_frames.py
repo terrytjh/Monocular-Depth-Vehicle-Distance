@@ -11,7 +11,8 @@ unmasked frame is ever written. It never reads the burned-in text, the audio or 
 ffmpeg's messages anywhere (they carry container metadata); only frame numbers, pts and error counts are kept from them.
 
 Input: only /mnt/d/depth_work/tw_own/raw_dev/<name>.MP4 with <name> in lists/dev_front_files.txt and in
-lists/dev_front_sha256.txt (the development days). Refused before anything is opened: /mnt/e/ and Windows paths, other
+lists/dev_front_sha256.txt (the development days); with --set blind1 (first blind test) raw_blind1, blind1_files.txt,
+blind1_sha256.txt, tags_blind1.tsv and frames_blind1 instead, and no sheet / selftest. Refused before anything is opened: /mnt/e/ and Windows paths, other
 folders, symlinks, names that are not listed. The source's sha256 is recomputed and must equal the list's. One tag per
 60-s file, from the tag table (lists/tags_dev.tsv: file, tag, trip_label, trip_id, start, duration_s, pictures):
 dod_<trip_id>_<HHMMSS>-<NN>, exactly two '_' (tools/car_a.py splits the tag in three; the drive part is the trip).
@@ -105,6 +106,15 @@ SHA_LIST = TW / "lists" / "dev_front_sha256.txt"
 TAGS_DEFAULT = TW / "lists" / "tags_dev.tsv"
 FRAMES_ROOT_DEFAULT = TW / "frames_dev"
 LOG_DEFAULT = TW / "logs" / "dod_frames.log"
+# Input sets (--set, default dev). blind1 = the first DOD blind test (docs/DOD_V12_BLIND_PREREG.md): the 60 drawn clips copied
+# from the external drive into raw_blind1 with their sha256 at copy time; frames are written but never shown (no sheet).
+SETS = {
+    "dev": dict(raw=TW / "raw_dev", files=TW / "lists" / "dev_front_files.txt", sha=TW / "lists" / "dev_front_sha256.txt",
+                tags=TW / "lists" / "tags_dev.tsv", frames=TW / "frames_dev", log=TW / "logs" / "dod_frames.log"),
+    "blind1": dict(raw=TW / "raw_blind1", files=TW / "lists" / "blind1_files.txt", sha=TW / "lists" / "blind1_sha256.txt",
+                   tags=TW / "lists" / "tags_blind1.tsv", frames=TW / "frames_blind1", log=TW / "logs" / "dod_frames_blind1.log"),
+}
+INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"
 FFMPEG_SHA256 = "e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99"   # 7.0.2 static, as the joint runs
 
@@ -165,8 +175,10 @@ def git(repo: Path, *args) -> subprocess.CompletedProcess:
 
 # ----------------------------------------------------------------------------------------------- inputs and lists
 
-def read_lists(files_list=FILES_LIST, sha_list=SHA_LIST):
-    """Names of the development files, and their sha256 (copy == source, third column 'same')."""
+def read_lists(files_list=None, sha_list=None):
+    """Names of the input set's files, and their sha256 (copy == source, third column 'same')."""
+    files_list = files_list or FILES_LIST
+    sha_list = sha_list or SHA_LIST
     names = {l.strip() for l in Path(files_list).read_text().splitlines() if l.strip()}
     sha = {}
     for l in Path(sha_list).read_text().splitlines():
@@ -218,7 +230,7 @@ def resolve_source(arg, names, sha) -> Path:
     if not NAME_RE.match(name):
         raise Refused(f"{s}: not a recorder file name")
     if name not in names or name not in sha:
-        raise Refused(f"{name}: not in {FILES_LIST.name} and {SHA_LIST.name} (development files only)")
+        raise Refused(f"{name}: not in {FILES_LIST.name} and {SHA_LIST.name} (input set {INPUT_SET} only)")
     if p.parent != RAW_DEV:
         raise Refused(f"{s}: only files directly in {RAW_DEV} are read")
     if Path(os.path.realpath(RAW_DEV)) != RAW_DEV:
@@ -1038,7 +1050,30 @@ def cmd_selftest(a):
     return 0 if n_pass == n else 1
 
 
+def use_set(name):
+    """Switch the module's input / output defaults to an input set before anything is parsed or opened."""
+    global RAW_DEV, FILES_LIST, SHA_LIST, TAGS_DEFAULT, FRAMES_ROOT_DEFAULT, LOG_DEFAULT, INPUT_SET
+    s = SETS[name]
+    RAW_DEV, FILES_LIST, SHA_LIST = s["raw"], s["files"], s["sha"]
+    TAGS_DEFAULT, FRAMES_ROOT_DEFAULT, LOG_DEFAULT, INPUT_SET = s["tags"], s["frames"], s["log"], name
+
+
 def main():
+    argv = sys.argv[1:]
+    name = "dev"
+    if "--set" in argv:
+        i = argv.index("--set")
+        if i + 1 >= len(argv) or argv[i + 1] not in SETS:
+            print(f"refused: --set must be one of {sorted(SETS)}", file=sys.stderr)
+            return 2
+        name = argv[i + 1]
+        del argv[i:i + 2]
+    use_set(name)
+    if name != "dev" and argv and argv[0] in ("sheet", "selftest"):
+        print(f"refused: {argv[0]} is for the development set only (blind frames are not looked at before the seal)",
+              file=sys.stderr)
+        return 2
+    sys.argv = [sys.argv[0]] + argv
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("extract")

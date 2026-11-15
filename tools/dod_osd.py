@@ -10,9 +10,9 @@ repository; --out and --templates inside a repository are refused.
 Development files only. A file is opened only if it sits in /mnt/d/depth_work/tw_own/raw_dev
 (no link), its name is in lists/dev_front_files.txt and lists/dev_front_sha256.txt, it was
 recorded on 2026-09-21, 09-23 or 09-24, and its recomputed sha256 equals the listed one.
-Anything else (another folder, the external drive, another date) is refused. Reading the
-first blind test is to be added only at its registration, behind a check that its predictions
-are sealed.
+Anything else (another folder, the external drive, another date) is refused. The first blind
+test (--set blind1: raw_blind1, blind1_files.txt / blind1_sha256.txt, recorded 2026-09-26 to
+10-03) is read only by `read`, and only after blind_gate() (tools/v12/dod_seal_check.py) has checked the committed, pushed seals.
 
 The burned-in text (bottom left, yellow at about 32 % opacity, monospaced, 24-px cells, cell i
 at x = 24 + 24 i, full resolution 1920 x 1080):
@@ -173,6 +173,21 @@ LIST_SHA = Path("/mnt/d/depth_work/tw_own/lists/dev_front_sha256.txt")
 DEV_DAYS = ("2026_09_21", "2026_09_23", "2026_09_24")
 FRAMES_ROOTS = (Path("/mnt/d/depth_work/tw_own/frames_dev"), Path("/mnt/d/depth_work/tw_own/frames_ab1080"))
 READ_LOG = Path("/mnt/d/depth_work/tw_own/logs/osd_reads.log")
+# Input sets (--set, default dev). blind1 = the first DOD blind test (docs/DOD_V12_BLIND_PREREG.md): only `read`, and only
+# after blind_gate() has checked the committed, pushed seals of every version's predictions against the files.
+SETS = {
+    "dev": dict(raw=Path("/mnt/d/depth_work/tw_own/raw_dev"), files=Path("/mnt/d/depth_work/tw_own/lists/dev_front_files.txt"),
+                sha=Path("/mnt/d/depth_work/tw_own/lists/dev_front_sha256.txt"), days=("2026_09_21", "2026_09_23", "2026_09_24"),
+                frames=(Path("/mnt/d/depth_work/tw_own/frames_dev"), Path("/mnt/d/depth_work/tw_own/frames_ab1080")),
+                log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads.log")),
+    "blind1": dict(raw=Path("/mnt/d/depth_work/tw_own/raw_blind1"), files=Path("/mnt/d/depth_work/tw_own/lists/blind1_files.txt"),
+                   sha=Path("/mnt/d/depth_work/tw_own/lists/blind1_sha256.txt"),
+                   days=("2026_09_26", "2026_09_27", "2026_09_28", "2026_09_29", "2026_09_30", "2026_10_01", "2026_10_02",
+                         "2026_10_03"),
+                   frames=(Path("/mnt/d/depth_work/tw_own/frames_blind1"),),
+                   log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads_blind1.log")),
+}
+INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"
 FFMPEG_SHA256 = "e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99"
 
@@ -1003,6 +1018,8 @@ def cmd_read(a):
     TDn, TUn = norm(TD), norm(TU)
     rows, tags_sha = load_tags(a.tags)
     tags_info = {"path": str(Path(a.tags).resolve()), "sha256": tags_sha}
+    if INPUT_SET != "dev":
+        tags_info["seals"] = blind_gate(a, Path(a.tags).resolve())
     dev_names, dev_sha = load_dev_lists()
     pred, last = {}, {}
     for r in rows:
@@ -1405,10 +1422,46 @@ def cmd_compare(a):
 
 
 # ----------------------------------------------------------------------------- main
+
+# ----------------------------------------------------------------------------- blind set
+def use_set(name):
+    global RAW_DEV, LIST_FILES, LIST_SHA, DEV_DAYS, FRAMES_ROOTS, READ_LOG, INPUT_SET
+    s = SETS[name]
+    RAW_DEV, LIST_FILES, LIST_SHA, DEV_DAYS = s["raw"], s["files"], s["sha"], s["days"]
+    FRAMES_ROOTS, READ_LOG, INPUT_SET = s["frames"], s["log"], name
+
+
+def blind_gate(a, tags_path):
+    """Before any blind file is opened: tools/v12/dod_seal_check.py check must pass for every (--seal digest in the
+    repository, --seal-private full seal, --pred-dir folder) triple: digests committed and on origin/main, private seals
+    pinned by them, every sealed file unchanged, every tag of the tags table sealed in each. Refuses otherwise."""
+    if not a.seal or not a.seal_private or not a.pred_dir:
+        refuse("blind read needs --seal, --seal-private and --pred-dir (one triple per sealed folder)")
+    r = subprocess.run([sys.executable, "-B", str(REPO / "tools/v12/dod_seal_check.py"), "check", "--tags", str(tags_path),
+                        "--seal", *a.seal, "--seal-private", *a.seal_private, "--pred-dir", *a.pred_dir],
+                       capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    if r.returncode != 0:
+        refuse("seal check failed: " + (r.stderr.strip() or "no message"))
+    return [dict(seal=str(x), sha256=sha256_file(Path(x))) for x in a.seal]
+
+
 def main():
+    argv = sys.argv[1:]
+    name = "dev"
+    if "--set" in argv:
+        i = argv.index("--set")
+        if i + 1 >= len(argv) or argv[i + 1] not in SETS:
+            refuse(f"--set must be one of {sorted(SETS)}")
+        name = argv[i + 1]
+        del argv[i:i + 2]
+    use_set(name)
+    if name != "dev" and (not argv or argv[0] != "read"):
+        refuse("the blind set allows only `read` (after the seal check)")
+    sys.argv = [sys.argv[0]] + argv
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("read", help="read the clock and the speed of development files")
+    r = sub.add_parser("read", help="read the clock and the speed of development files (or, --set blind1, blind files after the seal check)")
     g = r.add_mutually_exclusive_group(required=True)
     g.add_argument("--file", nargs="+", help="file names (NAME.MP4) in raw_dev")
     g.add_argument("--trip", nargs="+", help="trip labels of the tags table (T01 ...)")
@@ -1419,6 +1472,9 @@ def main():
     r.add_argument("--frames-csv", action="store_true", help="also write <tag>_osd_frames.csv")
     r.add_argument("--frames-root", default=str(FRAMES_ROOTS[0]), help="masked frames root, to cross-check mask.json")
     r.add_argument("--redo", action="store_true", help="read again even when an up-to-date summary exists")
+    r.add_argument("--seal", nargs="+", default=None, help="blind set: committed, pushed seal digests (docs/seals/...)")
+    r.add_argument("--seal-private", nargs="+", default=None, help="blind set: the private full seals, same order")
+    r.add_argument("--pred-dir", nargs="+", default=None, help="blind set: the folders the seals cover, same order")
     t = sub.add_parser("templates", help="rebuild candidate templates from a list of development files")
     t.add_argument("--files-list", required=True)
     t.add_argument("--out", required=True, help="new, empty folder")

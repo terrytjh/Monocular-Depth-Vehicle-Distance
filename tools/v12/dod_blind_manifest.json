@@ -1,0 +1,15 @@
+{
+ "note": "sha256 of the private files that docs/DOD_V12_BLIND_PREREG.md section 6 pins (paths under /mnt/d/depth_work/tw_own); checked by dod_blind_prepare.py copy and dod_blind_run.sh",
+ "files": {
+  "lists/dod_front_list_20261025.txt": "5f9ea88e3282f979d2dd0f53c8851f943e538913d8751f6213f7090c194377cf",
+  "lists/blind1_files.txt": "1a05c268709423a3f6ee83cb6f1071d549b5b36dfa335b9a3587fa314091801e",
+  "lists/blind1_draw.json": "83bb2fc68863dbf15d6327ba31c67e4db1e5012200a92b08d0999eacd941b952",
+  "v12dev_20261110/out/car_a_sides_dod_h.json": "7cc8d348a20246dcf2d0ff24e6d73f0413ceefdfb0dfbe05be58ecf1b210beec",
+  "dev_v11/work/repo/data/output/dash_scale/dod_dev/car_a.json": "e3d9d605b663c803c0b994ce78139bf1e73d0eb0b6e8f0c3e8205aa3dca1acec",
+  "dev_v11/work/repo/data/output/dash_scale/dod_dev/k_camera.json": "155cb7ed0c28a4ab9eb3afaada65d9c02330d398899b9fe6860ab305cda5fc37",
+  "dev_v11/params/v11f_params_dod.json": "c73555dc9531186a6abd3a51e53d9b3ef60f6ecae572484a16113972351498d9",
+  "dev_v11/work/PATCHES.diff": "23cf78cefd0bbb04045319298ce817be96dd9a23f255b7fbd8d3e9e893124d28",
+  "osd_templates/v1/digits.npy": "28d118a9576fc1a904c554b147e6271839264c29aea656937d8ab737fc8fb802",
+  "osd_templates/v1/unit.npy": "49cbead93903d5448c7187131a108a713fa440196fbb41b48f27651ef0979278"
+ }
+}

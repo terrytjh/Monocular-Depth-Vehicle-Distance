@@ -79,14 +79,12 @@ def camera_A_side(cs: dict, tag: str, side: str):
 
 
 def reference_horizon(cs: dict, tag: str):
-    """The horizon row a segment's camera normally has: the median of its own drive's passed daytime segments when the drive
-    has >= 2 of them, otherwise the median of the other drives' medians (None when neither exists)."""
+    """The horizon row the segment's camera normally has: the median of the OTHER drives' medians (the segment's own drive
+    left out, like every camera constant; a later batch with frozen constants has no own drive in the file). None when no
+    other drive exists."""
     cam, drive = tag_parts(tag)
     h = (((cs.get("cameras") or {}).get(cam) or {}).get("horizon")) or {}
-    dm, n = h.get("drive_median") or {}, h.get("segments") or {}
-    if n.get(drive, 0) >= 2:
-        return float(dm[drive]), "same drive"
-    vals = [v for d, v in dm.items() if d != drive]
+    vals = [v for d, v in (h.get("drive_median") or {}).items() if d != drive]
     return (float(st.median(vals)), "other drives") if vals else (None, None)
 
 
