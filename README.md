@@ -38,6 +38,7 @@ comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車�
 5. 封存之後才產生真值、評分;評分程式先核對封存雜湊。一批盲測片只用一次。
 
 真值:comma2k19 的原廠雷達、CAN 與定位(`tools/c2k19_extract.py`);Argoverse 2 的光達 3D 框與定位。
+台灣自己的行車紀錄器沒有真值,對照的是畫面疊字的 GPS 車速(參考值;預測封存並推上 GitHub 之後才讀,`tools/dod_osd.py`),方法減疊字叫「差距」。
 
 ## 版本
 
@@ -56,8 +57,10 @@ comma2k19 盲測片段。上:畫面與方法的輸出(每台車的距離與車�
 | 第九版 | 2026-10-15 22:03(`586cfeb`) | 標線幾何法改用整台相機的常數;白天一般道路的深度改用 MoGe-2 | comma2k19 Chunk_7 後半 101 段 | 已評分(`docs/DEPTH_DASH_V9_RESULTS.md`) |
 | 共同盲測(第九版 v9d / v9) | 2026-10-18 23:51(`f5078ab`) | 方法同第九版;v9d 的相機常數只從開發資料學 | comma2k19 Chunk_8 208 段,團隊共同評分規則 | 已評分(`docs/JOINT_CHUNK8_RESULTS.md`) |
 | 第十版 | 2026-10-19 08:07(`bcf3105`) | v9d 輸出的後處理:相機常數補位段的距離與標線幾何法平均;自車速、相對速度用較長的時間窗 | 與共同盲測同一批(不算共同成績) | 已評分(`docs/DEPTH_DASH_V10_RESULTS.md`) |
+| 第十一版 | 2026-10-26 04:22(`5f72866`) | 分級輸出(不整段拒發);自車速補位;分車道的路面校正;夜間偵測前調亮 | comma2k19 Chunk_9 210 段(與第十版同批) | 已評分(`docs/DEPTH_DASH_V11_RESULTS.md`) |
+| 第十二版 | 2026-11-15 16:40(`69199c6`) | 只改自車速:補位時每條車道線用自己的相機常數;地平線檢查;停車判斷。常數只從開發片來 | 台灣自己的行車紀錄器 60 支(只評自車速,對照畫面疊字的 GPS 車速) | 已評分(`docs/DOD_V12_BLIND_RESULTS.md`) |
 
-文件:各版的 `docs/DEPTH_DASH_V*_PREREG.md`(登錄)與 `docs/DEPTH_DASH_V*_RESULTS.md`(結果);
+文件:各版的 `docs/DEPTH_DASH_V*_PREREG.md`(登錄)與 `docs/DEPTH_DASH_V*_RESULTS.md`(結果);台灣盲測 `docs/DOD_V12_BLIND_PREREG.md`、`docs/DOD_V12_BLIND_RESULTS.md`;
 開發過程(每次看答案的時間與內容)`docs/TERRY_DEV_LOG.md`;封存雜湊 `docs/seals/`。
 
 ## 真值的更正(2026-10-02)
@@ -66,6 +69,27 @@ comma2k19 處理後的雷達距離已經是 CAN 訊號 LONG_DIST 加上 2.70 m(o
 (開發時約 520 萬筆;第四版評分前對 Chunk_4 205 段 3,915,426 筆再確認，全部 2.70 m)，並以法定車牌尺寸與車寬交叉檢查。
 第二、三版登錄的距離真值「雷達 + 2.37 m」因此遠了 2.70 m;正確真值 = 雷達 − 0.33 m。**第二、三版的距離數字不能當成準度**
 (照登錄保留，事後重算寫在各結果文件文末的追記);自車速、相對速度與他車絕對速度不受影響。第四版起一開始就用正確真值。
+
+## 結果(第十一版與第十二版，`docs/DEPTH_DASH_V11_RESULTS.md`、`docs/DOD_V12_BLIND_RESULTS.md`)
+
+**第十一版**(comma2k19 Chunk_9 210 段,共同評分規則,和第十版同一批;真值 30 m 內,白天高速公路組,第十版 → 第十一版):
+找得到的比例 73.7 → **80.3%**、距離中位誤差 3.35 → 3.40%、相對速度 1.53 → **1.37 km/h**、自車速(同一批秒)2.77 → **2.18 km/h**、
+有自車速的秒 59.0 → **86.4%**;60–100 m 找得到的比例 11.3 → 52.0%(中位 7.87%)。11 條預期 10 條達成;**未達成**:主要組的距離中位誤差不變差(3.35 → 3.40%)。
+
+**第十二版:台灣自己的行車紀錄器第一次盲測**(9/26–10/3 的 463 支裡每趟最多 4 支抽 60 支;只評自車速;登錄與封存都先推上 GitHub 才讀疊字車速)。
+主要組 53 支、疊字有車速的 1,730 秒,其中 54% 是停車(疊字 < 5 km/h),時速 30 以上只佔 15%:
+
+| | 第十一版 | 第十二版 |
+|---|---|---|
+| 有自車速的秒 | 8.2% | **32.3%** |
+| 平均絕對差距 | 13.50 km/h | **1.06 km/h** |
+| 停車(937 秒):有讀值 / 平均絕對差距 | 3.5% / 8.42 | **55.2% / 0.21 km/h** |
+| 時速 30 以上(254 秒):有讀值 | 10.6% | 0.4%(1 秒) |
+
+- 9 條預期 4 條達成(平均絕對差距、比第十一版好、停車的差距與有讀值比例);**未達成** 4 條:有讀值 ≥ 40%(32.3%)、時速 30 以上的差距與有讀值比例、95% 範圍涵蓋;1 條沒有可比的秒。
+- 停車判斷在沒看過的片上成立;**行駛中的自車速在這批以市區慢速為主的片上幾乎量不到**(兩把尺在 60 支裡只通過 3、4 支),開發片上「時速 30 以上 66% 的秒有讀值」沒有重現。
+  平均絕對差距 1.06 km/h 幾乎全來自停車的秒,不代表行駛中的車速準。
+- 同樣的改動放回 comma2k19 Chunk_9(答案已開過,事後重算):自車速白天高速公路 2.68 → 2.58 km/h、有自車速的秒 86.4 → 89.9%,進步來自停車的秒;行駛中的自車速、距離與相對速度不變。
 
 ## 結果(第 8 包共同盲測與第十版，`docs/JOINT_CHUNK8_RESULTS.md`、`docs/DEPTH_DASH_V10_RESULTS.md`)
 
@@ -176,6 +200,7 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 - **comma2k19**(MIT):https://huggingface.co/datasets/commaai/comma2k19 ，放在 `data/input/comma2k19/Chunk_*.zip`。
 - **Argoverse 2 Sensor**(CC BY-NC-SA 4.0,只能用於研究):https://www.argoverse.org/ 。
 - 海盛提供的台灣案例影片不公開。
+- 自己的行車紀錄器影片不公開;本 repo 只放程式、彙總數字與封存雜湊。
 
 ## 主要程式
 
@@ -203,6 +228,9 @@ pip install torch ultralytics opencv-python numpy pandas pyarrow scipy lap openp
 | `tools/v7_score.py`、`tools/v8_score.py`、`tools/v9_score.py`、`tools/v10_score.py` | 各版的評分(封存後才執行) |
 | `tools/joint_blank_dist.py`、`tools/joint_group_summary.py`、`tools/joint_own_score.py`、`tools/joint_chunk8/` | 共同盲測:封存前的格式轉換、分組彙總、依共同規則的獨立評分 |
 | `tools/regression_suite.py` | 固定的回歸測試組(開發資料),每一版都在同一組段上比較 |
+| `tools/v11/` | 第十一版的流程、參數與評分 |
+| `tools/v12/` | 第十二版(`v12_post.py`、`car_a_sides.py`、`stationary.py`)與台灣盲測的抽樣、常數、流程、封存核對、評分 |
+| `tools/dod_frames.py`、`tools/dod_osd.py`、`tools/dod_compare.py` | 台灣行車紀錄器:塗黑影格、讀疊字車速(封存後才能讀盲測片)、和疊字比對 |
 | `tools/report/demo_*.py` | 示範影片 |
 
 `tools/av1_*.py`、`tools/av2_*.py` 是 Argoverse 1/2 的下載、準備與評分;`tools/haisheng_manual_truth.py` 讀海盛的人工畫格法真值。
