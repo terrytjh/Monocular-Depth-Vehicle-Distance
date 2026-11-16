@@ -1,0 +1,12 @@
+{
+ "what": "DOD blind test blind2, eleventh version, per-clip files",
+ "private_seal_sha256": "14b8baaf6b24a19d19115235b95e15e64a9a37c83cecb31b81ce0024bc1e6ea8",
+ "files": 55,
+ "inputs": 12,
+ "sealed_utc": "2026-11-16T10:52:55Z",
+ "git_commit": "e7fe563ab20852d0e56288a9431994e46a928165",
+ "absent_at_seal": [
+  "/mnt/d/depth_work/tw_own/osd_blind2/*"
+ ],
+ "note": "the full seal (file names with recording dates and times) is kept privately; this digest pins it"
+}
