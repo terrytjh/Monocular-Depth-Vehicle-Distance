@@ -46,6 +46,13 @@ def one(args):
     top, bot = band_rows(run)
     sc = W / run["width"]
     t0, t1 = int(top * sc), int(bot * sc)
+    if t1 - t0 < 1:
+        # the run's horizon lies at or below the usable road band: there is no band to measure, so the segment gets no
+        # standing-still decision (motion null for every second). Without this the optical flow stops on an empty picture.
+        nsec = int(len(frames) / fps)
+        secs = [dict(second=b, motion=None, motion_p75=None, motion_p90=None, pairs=0) for b in range(nsec)]
+        out.write_text(json.dumps(dict(tag=tag, fps=fps, step=step, width_px=W, band_rows=[top, bot], no_band=True, seconds=secs)))
+        return tag, "no road band"
     def grey(i):
         g = cv2.imread(str(frames[i]), cv2.IMREAD_GRAYSCALE)
         return cv2.resize(g, (W, int(round(g.shape[0] * sc))), interpolation=cv2.INTER_AREA)
