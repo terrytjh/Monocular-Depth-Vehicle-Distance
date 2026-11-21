@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DOD blind tests, after the seals (SET=blind1: docs/DOD_V12_BLIND_PREREG.md; SET=blind2: docs/DOD_V12_BLIND2_PREREG.md;
+# DOD blind tests, after the seals (SET=blind1: docs/DOD_V12_BLIND_PREREG.md; SET=blind2 / blind2b: docs/DOD_V12_BLIND2_PREREG.md;
 # section 4, step 5): the overlay speed of the blind
 # clips is read only after tools/v12/dod_seal_check.py has confirmed the five digests on origin/main, the private seals
 # they pin and every sealed file; then the comparison of the eleventh and twelfth version and the registered numbers.
@@ -30,7 +30,7 @@ fi
 mkdir -p "$RUN/view_v12"; [ -e "$RUN/view_v12/ego" ] || ln -s ../ego_v12 "$RUN/view_v12/ego"; [ -e "$RUN/view_v12/lists" ] || ln -s ../lists "$RUN/view_v12/lists"
 $P -B tools/dod_compare.py --run "$RUN" --osd $TW/osd_$SET --frames $TW/frames_$SET --out "$RUN/cmp_v11" >> "$LOG" 2>&1 || stop "compare v11"
 $P -B tools/dod_compare.py --run "$RUN/view_v12" --osd $TW/osd_$SET --frames $TW/frames_$SET --out "$RUN/cmp_v12" >> "$LOG" 2>&1 || stop "compare v12"
-if [ "$SET" = blind2 ]; then
+if [ "$SET" = blind2 ] || [ "$SET" = blind2b ]; then
   $P -B tools/v12/dod_blind2_score.py --cmp11 "$RUN/cmp_v11" --cmp12 "$RUN/cmp_v12" --out "$RUN/score_$SET.json" \
      --label "DOD highway blind test (two trips named as highway driving, 2026-10-07 and 10-08)" | tee -a "$LOG"
 else

@@ -7,7 +7,9 @@ rows y >= 870 of the 1080, full width, are black (the burned-in lines, the dashb
 blacks from row 864 (Terry, 2026-10-28: 6 rows more, so that the mask edge falls on the 16-row JPEG block grid at both
 sizes, 864 = 54 x 16 and at 720p 576 = 36 x 16, and every pixel of rows >= 870 is exactly 0 in the written frames). The
 mask is applied INSIDE ffmpeg (the rows are cropped away and padded back black) before any frame is encoded, so no
-unmasked frame is ever written. It never reads the burned-in text, the audio or a metadata value, and it never writes
+unmasked frame is ever written. Picture size: a file is 1920 x 1080, or 2560 x 1440 (the recorder's other mode, the same
+burned-in lines at 4/3 of the positions); a 2560 x 1440 file is scaled to 1920 x 1080 inside ffmpeg first and then masked
+exactly as a 1080p file (rows >= 864 of the 1080 = rows >= 1152 of the 1440). Any other size is not decoded. It never reads the burned-in text, the audio or a metadata value, and it never writes
 ffmpeg's messages anywhere (they carry container metadata); only frame numbers, pts and error counts are kept from them.
 
 Input: only /mnt/d/depth_work/tw_own/raw_dev/<name>.MP4 with <name> in lists/dev_front_files.txt and in
@@ -98,7 +100,7 @@ import band_bottom as BB  # noqa: E402
 import day_night as DN  # noqa: E402
 
 TOOL = "tools/dod_frames.py"
-TOOL_VERSION = "2 (2026-10-28, mask edge 864)"
+TOOL_VERSION = "3 (2026-11-21, mask edge 864; 2560 x 1440 files scaled to 1080p first)"
 TW = Path("/mnt/d/depth_work/tw_own")
 RAW_DEV = TW / "raw_dev"
 FILES_LIST = TW / "lists" / "dev_front_files.txt"
@@ -108,7 +110,8 @@ FRAMES_ROOT_DEFAULT = TW / "frames_dev"
 LOG_DEFAULT = TW / "logs" / "dod_frames.log"
 # Input sets (--set, default dev). blind1 = the first DOD blind test (docs/DOD_V12_BLIND_PREREG.md): the 60 drawn clips copied
 # from the external drive into raw_blind1 with their sha256 at copy time; frames are written but never shown (no sheet).
-# blind2 = the highway blind test (docs/DOD_V12_BLIND2_PREREG.md), same rules.
+# blind2 = the highway blind test (docs/DOD_V12_BLIND2_PREREG.md), same rules. blind2b = the same 55 files and lists, frames made
+# again after the picture-size fix of 2026-11-21 (addendum 2 of that registration), in their own folder.
 SETS = {
     "dev": dict(raw=TW / "raw_dev", files=TW / "lists" / "dev_front_files.txt", sha=TW / "lists" / "dev_front_sha256.txt",
                 tags=TW / "lists" / "tags_dev.tsv", frames=TW / "frames_dev", log=TW / "logs" / "dod_frames.log"),
@@ -116,6 +119,8 @@ SETS = {
                    tags=TW / "lists" / "tags_blind1.tsv", frames=TW / "frames_blind1", log=TW / "logs" / "dod_frames_blind1.log"),
     "blind2": dict(raw=TW / "raw_blind2", files=TW / "lists" / "blind2_files.txt", sha=TW / "lists" / "blind2_sha256.txt",
                    tags=TW / "lists" / "tags_blind2.tsv", frames=TW / "frames_blind2", log=TW / "logs" / "dod_frames_blind2.log"),
+    "blind2b": dict(raw=TW / "raw_blind2", files=TW / "lists" / "blind2_files.txt", sha=TW / "lists" / "blind2_sha256.txt",
+                    tags=TW / "lists" / "tags_blind2.tsv", frames=TW / "frames_blind2b", log=TW / "logs" / "dod_frames_blind2b.log"),
 }
 INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"
@@ -125,6 +130,10 @@ SRC_W, SRC_H = 1920, 1080
 MASK_Y = 864              # mask edge: the agreed rows >= 870 plus 6, on the 16-row JPEG block grid (Terry, 2026-10-28)
 RULE_Y = 870              # the agreed rule: every pixel of rows >= 870 is exactly 0 in every written frame
 _MASK_VF = f"crop={SRC_W}:{MASK_Y}:0:0,pad={SRC_W}:{SRC_H}:0:0:black"
+# Accepted picture sizes and what is put in front of the mask. Until 2026-11-21 the size was not looked at, and the crop of
+# the mask took the top-left 1920 x 864 of a 2560 x 1440 picture.
+SOURCE_PRE = {(1920, 1080): "", (2560, 1440): f"scale={SRC_W}:{SRC_H}:flags=area,"}
+VIDEO_SIZE = re.compile(r"Stream #0:\d+.*?: Video: .*?, (\d{3,5})x(\d{3,5})[ ,\[]")
 RES = {
     "1080": dict(size=(1920, 1080), mask_row=864, rule_row=870, vf=_MASK_VF),
     "720": dict(size=(1280, 720), mask_row=576, rule_row=580,
@@ -317,11 +326,23 @@ def timing(src):
     return (info, bool(off.any()), [int(x) for x in pic], tb), None
 
 
-def decode(src, tmp: Path, res: str):
-    """ffmpeg -> masked JPEGs in tmp. Of the messages only showinfo's frame numbers / pts and level counts are kept."""
+def picture_size(src):
+    """(width, height) of the first video stream from ffmpeg's stream line, or None. Nothing else of the messages is kept."""
+    p = subprocess.run([str(FFMPEG), "-nostdin", "-hide_banner", "-i", str(src)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE)
+    for line in p.stderr.decode("utf-8", "replace").splitlines():
+        m = VIDEO_SIZE.search(line)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def decode(src, tmp: Path, res: str, pre: str = ""):
+    """ffmpeg -> masked JPEGs in tmp. Of the messages only showinfo's frame numbers / pts and level counts are kept.
+    pre = SOURCE_PRE of the file's picture size (empty for 1920 x 1080)."""
     cmd = [str(FFMPEG), "-nostdin", "-hide_banner", "-loglevel", "level+info", "-threads", "4", "-i", str(src),
            "-map", "0:v:0", "-an", "-sn", "-dn", "-fps_mode", "passthrough", "-enc_time_base", "demux",
-           "-vf", RES[res]["vf"] + ",showinfo", *JPEG_ARGS, "-start_number", "1", str(tmp / "f%05d.jpg")]
+           "-vf", pre + RES[res]["vf"] + ",showinfo", *JPEG_ARGS, "-start_number", "1", str(tmp / "f%05d.jpg")]
     p = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     shown, tb, err, warn = [], None, 0, 0
     for line in p.stderr.decode("utf-8", "replace").splitlines():
@@ -472,13 +493,21 @@ def make_clip(src: Path, row: dict, sha_expected: str, res: str, out: Path, ctx:
     if not checks["fps_range"]:
         reasons.append(f"fps {info['fps']} outside {FPS_RANGE[0]}-{FPS_RANGE[1]} (not decoded)")
         return done()
+    size = picture_size(src)
+    pre = SOURCE_PRE.get(size)
+    rec["source"]["picture_size"] = None if size is None else list(size)
+    rec["source"]["scaled_first"] = None if pre is None else (pre.rstrip(",") or None)
+    checks["picture_size"] = pre is not None
+    if pre is None:
+        reasons.append(f"picture size {size} is not one of {sorted(SOURCE_PRE)} (not decoded)")
+        return done()
 
     tmp = out / "frames.tmp"
     if tmp.exists():
         remove_frames_dir(tmp)                       # left by an interrupted run of this tool
     tmp.mkdir(parents=True)
     t2 = time.time()
-    dec, shown, stb = decode(src, tmp, res)
+    dec, shown, stb = decode(src, tmp, res, pre)
     sec["decode"] = round(time.time() - t2, 2)
     files = sorted(tmp.iterdir())
     n = len(files)
@@ -954,6 +983,31 @@ def cmd_selftest(a):
           and RES["1080"]["rule_row"] == RULE_Y and MASK_Y <= RULE_Y, f"{MASK_Y} / {RES['720']['mask_row']}")
     root = work / "root_720"
     tdir = root / row["tag"]
+    # picture sizes: the same pictures at 2560 x 1440 must give (nearly) the same masked frames; another size is not decoded
+    def variant(name, vf):
+        f = work / name
+        rr = subprocess.run([str(FFMPEG), "-nostdin", "-hide_banner", "-v", "error", "-f", "lavfi", "-i",
+                             "testsrc2=size=1920x1080:rate=25:duration=4", "-vf", vf + ",format=yuvj420p", "-c:v", "libx265",
+                             "-x265-params", "log-level=error", "-tag:v", "hvc1", "-video_track_timescale", "120000",
+                             "-y", str(f)], capture_output=True)
+        return f if rr.returncode == 0 else None
+    big = variant("2000_01_01_000100_00.MP4", "scale=2560:1440:flags=bicubic,drawbox=x=0:y=1147:w=2560:h=293:color=white:t=fill")
+    small = variant("2000_01_01_000200_00.MP4", "scale=1280:720:flags=bicubic")
+    check("synthetic 2560 x 1440 and 1280 x 720 clips made", big is not None and small is not None)
+    st, msg, rec_b = process_clip(big, row, sha256_file(big), "720", work / "root_1440", False, ctx)
+    a0 = cv2.imread(str(tdir / "frames" / "f00050.jpg"))
+    b0 = cv2.imread(str(work / "root_1440" / row["tag"] / "frames" / "f00050.jpg"))
+    diff = None if a0 is None or b0 is None else float(np.abs(a0[:560].astype(np.int16) - b0[:560].astype(np.int16)).mean())
+    check("2560 x 1440: scaled to 1080p first, checks_ok, rule rows exactly 0", st == "made" and rec_b["checks_ok"]
+          and rec_b["source"]["picture_size"] == [2560, 1440] and rec_b["source"]["scaled_first"] is not None
+          and rec_b["mask"]["max_in_rule_rows"] == 0, rec_b["source"].get("scaled_first"))
+    check("2560 x 1440: the frames show the whole picture, as the 1080p clip's (mean abs difference < 6 grey levels)",
+          diff is not None and diff < 6, None if diff is None else round(diff, 2))
+    check("1920 x 1080: nothing put in front of the mask", recs["720"]["source"]["picture_size"] == [1920, 1080]
+          and recs["720"]["source"]["scaled_first"] is None and "scale=1920" not in " ".join(recs["720"]["decode"]["command"]))
+    st, msg, rec_s = process_clip(small, row, sha256_file(small), "720", work / "root_small", False, ctx)
+    check("another picture size is not decoded", st == "failed" and rec_s["checks"].get("picture_size") is False
+          and rec_s["decode"] is None and not (work / "root_small" / row["tag"] / "frames").exists(), msg[:60])
     # determinism and --remake
     st, msg, rec2 = process_clip(syn, row, sha, "720", work / "root_720b", False, ctx)
     same = (tdir / "frames.csv").read_bytes() == (work / "root_720b" / row["tag"] / "frames.csv").read_bytes()

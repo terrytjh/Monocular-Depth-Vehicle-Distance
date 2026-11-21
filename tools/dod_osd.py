@@ -22,6 +22,8 @@ at x = 24 + 24 i, full resolution 1920 x 1080):
                        cell 22 empty, then 1-3 digits from cell 23 read: the speed
                        and 'km/h' right after them (cells 23-29)
 All of it lies below y = 870, in the rows blacked out in every frame the method sees.
+Picture size: these positions are those of a 1920 x 1080 file. A 2560 x 1440 file (the recorder's other mode: the same
+lines at 4/3 of the positions) is scaled to 1920 x 1080 inside ffmpeg before the crop; any other size stops the read.
 
 Privacy. ffmpeg crops x 24-743, y 974-1057 and paints line-3 cells 0-21 black (drawbox)
 before any pixel leaves ffmpeg, so the latitude/longitude text never reaches Python. Every
@@ -162,7 +164,7 @@ from pathlib import Path
 
 import numpy as np
 
-TOOL_VERSION = "1 (2026-10-28)"
+TOOL_VERSION = "2 (2026-11-21; 2560 x 1440 files scaled to 1080p before the crop)"
 TOOL = Path(__file__).resolve()
 REPO = TOOL.parents[1]
 FORBIDDEN_TREES = (REPO, Path("/mnt/d/team_repo"))
@@ -190,6 +192,11 @@ SETS = {
                    sha=Path("/mnt/d/depth_work/tw_own/lists/blind2_sha256.txt"), days=("2026_10_07", "2026_10_08"),
                    frames=(Path("/mnt/d/depth_work/tw_own/frames_blind2"),),
                    log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads_blind2.log")),
+    # the same 55 files and lists as blind2, predicted again after the picture-size fix of 2026-11-21 (addendum 2)
+    "blind2b": dict(raw=Path("/mnt/d/depth_work/tw_own/raw_blind2"), files=Path("/mnt/d/depth_work/tw_own/lists/blind2_files.txt"),
+                    sha=Path("/mnt/d/depth_work/tw_own/lists/blind2_sha256.txt"), days=("2026_10_07", "2026_10_08"),
+                    frames=(Path("/mnt/d/depth_work/tw_own/frames_blind2b"),),
+                    log=Path("/mnt/d/depth_work/tw_own/logs/osd_reads_blind2b.log")),
 }
 INPUT_SET = "dev"
 FFMPEG = Path.home() / ".local/bin/ffmpeg"
@@ -206,6 +213,10 @@ L2_ROW, L3_ROW = 0, 54
 HIDE_W = 22 * CELL                       # line-3 cells 0-21 (latitude/longitude): crop columns 0-527
 VF_READ = f"crop={BW}:{BH}:{BX}:{BY},drawbox=x=0:y={L3_ROW}:w={HIDE_W}:h=30:color=black:t=fill"
 HIDDEN_MAX, HIDDEN_PTP = 20, 2           # the drawn box must be one flat dark value
+# Accepted picture sizes and what is put in front of every filter chain. Until 2026-11-21 the size was not looked at, and a
+# 2560 x 1440 file was cropped at the 1080p positions (nothing read: 0 clock reads, 0 speed frames).
+SOURCE_PRE = {(1920, 1080): "", (2560, 1440): "scale=1920:1080:flags=area,"}
+VIDEO_SIZE = re.compile(r"Stream #0:\d+.*?: Video: .*?, (\d{3,5})x(\d{3,5})[ ,\[]")
 # validation crop: x 552-759, y 1022-1061 decoded (cell 22 checked), x 568-759 written
 SX, SY, SW, SH = 552, 1022, 208, 40
 SAVE_X0 = 568 - SX
@@ -425,6 +436,26 @@ def packet_table(path: Path) -> dict:
 
 
 # ----------------------------------------------------------------------------- decoding
+def picture_size(path: Path):
+    """(width, height) of the first video stream from ffmpeg's stream line, or None. Nothing else of the messages is kept."""
+    r = subprocess.run([str(FFMPEG), "-nostdin", "-hide_banner", "-i", str(path)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE)
+    for line in r.stderr.decode("utf-8", "replace").splitlines():
+        m = VIDEO_SIZE.search(line)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def sized(path: Path, vf: str):
+    """The filter chain for this file: vf itself for 1920 x 1080, the scaling to 1080p first for 2560 x 1440; any other
+    picture size stops. Returns (chain, [width, height])."""
+    size = picture_size(path)
+    if size not in SOURCE_PRE:
+        raise SystemExit(f"stop: {path.name}: picture size {size} is not one of {sorted(SOURCE_PRE)}")
+    return SOURCE_PRE[size] + vf, list(size)
+
+
 def ffmpeg_cmd(path: Path, vf: str):
     return [str(FFMPEG), "-nostdin", "-hide_banner", "-v", "error", "-threads", "4", "-i", str(path),
             "-map", "0:v:0", "-an", "-sn", "-dn", "-fps_mode", "passthrough", "-enc_time_base", "demux",
@@ -817,7 +848,8 @@ def read_one(row, path, sha_listed, TDn, TUn, tsha, tags_info, out, frames_root,
         res.append((r["value"], r["reason"], r["ndig"], r["unit"], r["dscore"], r["dmargin"], c, occ22))
 
     t0 = time.time()
-    n, rc, nmsg, cmd = decode(path, VF_READ, BW, BH, on_frame)
+    vf, psize = sized(path, VF_READ)
+    n, rc, nmsg, cmd = decode(path, vf, BW, BH, on_frame)
     t_dec = time.time() - t0
     if rc != 0:
         raise SystemExit(f"stop: {name}: ffmpeg exit {rc}")
@@ -979,7 +1011,8 @@ def read_one(row, path, sha_listed, TDn, TUn, tsha, tags_info, out, frames_root,
             **run["git"], "made": now(),
             "file": name, "tag": tag, "trip_label": row["trip_label"], "trip_id": row["trip_id"],
             "source": {"path": str(path), "bytes": path.stat().st_size, "sha256": sha_listed,
-                       "sha256_list": str(LIST_SHA), "sha256_rechecked": True},
+                       "sha256_list": str(LIST_SHA), "sha256_rechecked": True, "picture_size": psize,
+                       "scaled_first": SOURCE_PRE[tuple(psize)].rstrip(",") or None},
             "tags_table": tags_info, "templates": tsha,
             "ffmpeg": {"path": str(FFMPEG), "sha256": run["ffmpeg_sha256"], "command": cmd, "exit": rc,
                        "message_lines": nmsg},
@@ -1158,7 +1191,7 @@ def cmd_templates(a):
             L2.append(yellowness(frame[L2_ROW:L2_ROW + 30, :CELL * 19]).astype(np.uint8))
             SP.append(yellowness(frame[L3_ROW:L3_ROW + 30, CELL * 23:CELL * 30]).astype(np.uint8))
 
-        n, rc, _, _ = decode(path, VF_READ, BW, BH, on_frame)
+        n, rc, _, _ = decode(path, sized(path, VF_READ)[0], BW, BH, on_frame)
         tail = pk["pictures"] - n
         if rc != 0 or not (tail == 0 or (pk["timing_irregular"] and 1 <= tail <= 2)):
             raise SystemExit(f"stop: {name}: exit {rc}, {n} frames of {pk['pictures']}")
@@ -1297,7 +1330,7 @@ def cmd_sample(a):
                 crops[(name, i)] = (img if ok22 else None, float(np.median(bg)) if bg.size else 0.0,
                                     float(bg.std()) if bg.size else 0.0)
 
-        n, rc, _, _ = decode(path, f"crop={SW}:{SH}:{SX}:{SY}", SW, SH, on_frame)
+        n, rc, _, _ = decode(path, sized(path, f"crop={SW}:{SH}:{SX}:{SY}")[0], SW, SH, on_frame)
         if rc != 0:
             raise SystemExit(f"stop: {name}: ffmpeg exit {rc}")
     usable = [c for c in cand if crops.get((c["file"], c["frame"]), (None,))[0] is not None]
