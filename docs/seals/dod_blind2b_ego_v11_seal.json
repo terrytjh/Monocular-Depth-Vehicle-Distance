@@ -1,0 +1,12 @@
+{
+ "what": "DOD blind test blind2b, eleventh version, per-second ego speed",
+ "private_seal_sha256": "68237a6d88dae97b05470250bcbbf281286a3a5deda06d30148a11c9fd444bb0",
+ "files": 55,
+ "inputs": 12,
+ "sealed_utc": "2026-11-21T07:29:52Z",
+ "git_commit": "0c867a13f296b8ae4d8ad64ded1f6200bd7bab93",
+ "absent_at_seal": [
+  "/mnt/d/depth_work/tw_own/osd_blind2b/*"
+ ],
+ "note": "the full seal (file names with recording dates and times) is kept privately; this digest pins it"
+}
